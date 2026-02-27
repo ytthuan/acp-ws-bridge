@@ -9,6 +9,9 @@ use axum::routing::get;
 use axum::{Json, Router};
 use tower_http::cors::CorsLayer;
 
+use axum::response::IntoResponse;
+
+use crate::history;
 use crate::session::{SessionInfo, SessionManager, SessionStats};
 
 /// Shared state for API handlers.
@@ -63,6 +66,32 @@ async fn get_stats(State(state): State<ApiState>) -> Json<SessionStats> {
     Json(state.session_manager.get_stats().await)
 }
 
+// -- History endpoints (read-only, from ~/.copilot/session-store.db) --
+
+/// GET /api/history/sessions — list all historical sessions
+async fn list_history_sessions() -> impl IntoResponse {
+    match history::list_sessions() {
+        Ok(sessions) => Json(sessions).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+/// GET /api/history/sessions/:id — get session turns
+async fn get_history_session(Path(id): Path<String>) -> impl IntoResponse {
+    match history::get_session_turns(&id) {
+        Ok(turns) => Json(turns).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+/// GET /api/history/stats — aggregate stats
+async fn get_history_stats() -> impl IntoResponse {
+    match history::get_history_stats() {
+        Ok(stats) => Json(stats).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
 /// Build the axum Router for the REST API.
 pub fn api_router(session_manager: SessionManager) -> Router {
     let state = ApiState {
@@ -78,6 +107,9 @@ pub fn api_router(session_manager: SessionManager) -> Router {
             get(get_session).delete(delete_session),
         )
         .route("/api/stats", get(get_stats))
+        .route("/api/history/sessions", get(list_history_sessions))
+        .route("/api/history/sessions/:id", get(get_history_session))
+        .route("/api/history/stats", get(get_history_stats))
         .layer(CorsLayer::permissive())
         .with_state(state)
 }

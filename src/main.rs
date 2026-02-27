@@ -3,6 +3,7 @@ mod api;
 mod bridge;
 mod config;
 mod copilot;
+mod history;
 mod session;
 mod tls;
 mod ws;
