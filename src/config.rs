@@ -41,8 +41,8 @@ pub struct Config {
     #[arg(long, default_value = "localhost,127.0.0.1")]
     pub cert_hostnames: String,
 
-    /// REST API listen port (DEPRECATED: REST API is now served on ws_port)
-    #[arg(long, hide = true)]
+    /// REST API listen port (default: ws_port + 1)
+    #[arg(long)]
     pub api_port: Option<u16>,
 
     /// Log level

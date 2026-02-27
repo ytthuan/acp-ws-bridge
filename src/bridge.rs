@@ -12,7 +12,6 @@ use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::Router;
 
-use crate::api;
 use crate::config::Config;
 use crate::session::{SessionManager, SessionStatus};
 use crate::tls;
@@ -40,7 +39,7 @@ impl Bridge {
         }
     }
 
-    /// Run the combined HTTP + WebSocket server on a single port.
+    /// Run the WebSocket-only server.
     pub async fn run(&self) -> anyhow::Result<()> {
         let addr = format!("{}:{}", self.config.listen_addr, self.config.ws_port);
 
@@ -50,14 +49,11 @@ impl Bridge {
             copilot_port: self.config.copilot_port,
         };
 
-        // Build combined router: REST API + WebSocket on the same port
-        let api_router = api::api_router(self.session_manager.clone());
-        let ws_routes = Router::new()
+        // WebSocket-only router (REST API runs on a separate port)
+        let app = Router::new()
             .route("/ws", get(ws_upgrade_handler))
             .route("/", get(ws_upgrade_handler))
             .with_state(ws_state);
-
-        let app = api_router.merge(ws_routes);
 
         let listener = tokio::net::TcpListener::bind(&addr).await?;
 
@@ -66,7 +62,7 @@ impl Bridge {
                 let tls_acceptor = tls::load_tls_config(cert, key)?;
                 tracing::info!("TLS enabled (cert: {}, key: {})", cert, key);
                 tracing::info!(
-                    "Server listening on https://{} (REST API + WebSocket)",
+                    "WebSocket listening on wss://{}",
                     addr
                 );
                 serve_with_tls(listener, app, tls_acceptor).await
@@ -76,7 +72,7 @@ impl Bridge {
             }
             _ => {
                 tracing::info!(
-                    "Server listening on http://{} (REST API + WebSocket)",
+                    "WebSocket listening on ws://{}",
                     addr
                 );
                 axum::serve(
