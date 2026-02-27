@@ -3,14 +3,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use axum::extract::ws::{CloseFrame, Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
-use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{mpsc, watch};
 use tokio::time::Instant;
-use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
-use tokio_tungstenite::tungstenite::protocol::CloseFrame;
-use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::WebSocketStream;
 
 use crate::acp::{JsonRpcMessage, NdjsonReader, NdjsonWriter};
 use crate::session::SessionManager;
@@ -36,16 +32,14 @@ fn extract_session_id_from_result(json: &str) -> Option<String> {
 /// Relay messages bidirectionally between a WebSocket connection and an NDJSON TCP connection.
 /// The TCP connection to Copilot CLI is established **lazily** — only when the first WebSocket
 /// message arrives. This allows "test connection" (ping/pong) to succeed without Copilot CLI running.
-pub async fn relay_lazy<S>(
-    ws_stream: WebSocketStream<S>,
+pub async fn relay_lazy(
+    ws_stream: WebSocket,
     copilot_host: &str,
     copilot_port: u16,
     sm: SessionManager,
     session_id: &str,
     shutdown_rx: watch::Receiver<bool>,
-) where
-    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
-{
+) {
     let (mut ws_sink, mut ws_stream_read) = ws_stream.split();
 
     // Channel for outbound WebSocket messages
@@ -215,7 +209,7 @@ pub async fn relay_lazy<S>(
         } => {
             tracing::info!(session_id = session_id, "Session idle timeout — sending close frame");
             let close = Message::Close(Some(CloseFrame {
-                code: CloseCode::Away,
+                code: 1001,
                 reason: "idle timeout".into(),
             }));
             let _ = ws_tx_idle.send(close).await;

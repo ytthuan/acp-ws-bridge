@@ -1,9 +1,18 @@
 //! Bridge logic connecting ACP streams to WebSocket clients.
 
-use tokio::net::TcpListener;
-use tokio_native_tls::TlsAcceptor;
-use tokio_tungstenite::accept_async;
+use std::convert::Infallible;
+use std::future::Future;
+use std::net::SocketAddr;
+use std::pin::Pin;
 
+use axum::extract::connect_info::ConnectInfo;
+use axum::extract::ws::WebSocketUpgrade;
+use axum::extract::State;
+use axum::response::IntoResponse;
+use axum::routing::get;
+use axum::Router;
+
+use crate::api;
 use crate::config::Config;
 use crate::session::{SessionManager, SessionStatus};
 use crate::tls;
@@ -15,6 +24,14 @@ pub struct Bridge {
     session_manager: SessionManager,
 }
 
+/// Shared state for WebSocket upgrade handlers.
+#[derive(Clone)]
+struct WsState {
+    session_manager: SessionManager,
+    copilot_host: String,
+    copilot_port: u16,
+}
+
 impl Bridge {
     pub fn new(config: Config, session_manager: SessionManager) -> Self {
         Self {
@@ -23,90 +40,165 @@ impl Bridge {
         }
     }
 
-    /// Get a reference to the session manager.
-    pub fn session_manager(&self) -> &SessionManager {
-        &self.session_manager
-    }
-
-    /// Run the WebSocket server and handle connections.
+    /// Run the combined HTTP + WebSocket server on a single port.
     pub async fn run(&self) -> anyhow::Result<()> {
         let addr = format!("{}:{}", self.config.listen_addr, self.config.ws_port);
-        let listener = TcpListener::bind(&addr).await?;
 
-        // Load TLS if configured
-        let tls_acceptor = match (&self.config.tls_cert, &self.config.tls_key) {
+        let ws_state = WsState {
+            session_manager: self.session_manager.clone(),
+            copilot_host: self.config.copilot_host.clone(),
+            copilot_port: self.config.copilot_port,
+        };
+
+        // Build combined router: REST API + WebSocket on the same port
+        let api_router = api::api_router(self.session_manager.clone());
+        let ws_routes = Router::new()
+            .route("/ws", get(ws_upgrade_handler))
+            .route("/", get(ws_upgrade_handler))
+            .with_state(ws_state);
+
+        let app = api_router.merge(ws_routes);
+
+        let listener = tokio::net::TcpListener::bind(&addr).await?;
+
+        match (&self.config.tls_cert, &self.config.tls_key) {
             (Some(cert), Some(key)) => {
-                let acceptor = tls::load_tls_config(cert, key)?;
+                let tls_acceptor = tls::load_tls_config(cert, key)?;
                 tracing::info!("TLS enabled (cert: {}, key: {})", cert, key);
-                Some(acceptor)
+                tracing::info!(
+                    "Server listening on https://{} (REST API + WebSocket)",
+                    addr
+                );
+                serve_with_tls(listener, app, tls_acceptor).await
             }
             (Some(_), None) | (None, Some(_)) => {
                 anyhow::bail!("Both --tls-cert and --tls-key must be provided for TLS");
             }
-            _ => None,
-        };
-
-        let scheme = if tls_acceptor.is_some() { "wss" } else { "ws" };
-        tracing::info!("WebSocket server listening on {}://{}", scheme, addr);
-
-        loop {
-            let (stream, peer_addr) = listener.accept().await?;
-            tracing::info!("New connection from {}", peer_addr);
-
-            let copilot_host = self.config.copilot_host.clone();
-            let copilot_port = self.config.copilot_port;
-            let tls_acceptor = tls_acceptor.clone();
-            let sm = self.session_manager.clone();
-
-            tokio::spawn(async move {
-                // Register a session for this connection (with shutdown signaling)
-                let handle = sm.register(peer_addr).await;
-                let session_id = handle.id.clone();
-                let shutdown_rx = handle.shutdown_rx.clone();
-                tracing::info!("Registered session {} for {}", session_id, peer_addr);
-
-                if let Err(e) =
-                    handle_connection(stream, peer_addr, &copilot_host, copilot_port, tls_acceptor, sm.clone(), &session_id, shutdown_rx)
-                        .await
-                {
-                    tracing::error!("Connection error for {} (session {}): {}", peer_addr, session_id, e);
-                    sm.update_status(&session_id, SessionStatus::Error).await;
-                }
-
-                // Record final activity and clean up the session
-                handle.touch().await;
-                sm.unregister(&session_id).await;
-                tracing::info!("Connection closed for {} (session {})", peer_addr, session_id);
-            });
+            _ => {
+                tracing::info!(
+                    "Server listening on http://{} (REST API + WebSocket)",
+                    addr
+                );
+                axum::serve(
+                    listener,
+                    app.into_make_service_with_connect_info::<SocketAddr>(),
+                )
+                .await?;
+                Ok(())
+            }
         }
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn handle_connection(
-    stream: tokio::net::TcpStream,
-    peer_addr: std::net::SocketAddr,
-    copilot_host: &str,
-    copilot_port: u16,
-    tls_acceptor: Option<TlsAcceptor>,
-    sm: SessionManager,
-    session_id: &str,
-    shutdown_rx: tokio::sync::watch::Receiver<bool>,
-) -> anyhow::Result<()> {
-    // First, complete the WebSocket handshake (no Copilot CLI connection yet).
-    // This allows "test connection" pings to succeed without Copilot CLI running.
-    if let Some(acceptor) = tls_acceptor {
-        let tls_stream = acceptor.accept(stream).await?;
-        let ws_stream = accept_async(tls_stream).await?;
-        tracing::info!("WSS handshake complete for {}", peer_addr);
-        sm.update_status(session_id, SessionStatus::Active).await;
-        ws::relay_lazy(ws_stream, copilot_host, copilot_port, sm, session_id, shutdown_rx).await;
-    } else {
-        let ws_stream = accept_async(stream).await?;
-        tracing::info!("WebSocket handshake complete for {}", peer_addr);
-        sm.update_status(session_id, SessionStatus::Active).await;
-        ws::relay_lazy(ws_stream, copilot_host, copilot_port, sm, session_id, shutdown_rx).await;
-    }
+/// WebSocket upgrade handler for both `/ws` and `/` routes.
+async fn ws_upgrade_handler(
+    ws: WebSocketUpgrade,
+    ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,
+    State(state): State<WsState>,
+) -> impl IntoResponse {
+    tracing::info!("WebSocket upgrade request from {}", peer_addr);
+    ws.on_upgrade(move |socket| handle_ws_connection(socket, peer_addr, state))
+}
 
-    Ok(())
+/// Handle an upgraded WebSocket connection.
+async fn handle_ws_connection(
+    socket: axum::extract::ws::WebSocket,
+    peer_addr: SocketAddr,
+    state: WsState,
+) {
+    let sm = state.session_manager.clone();
+    let handle = sm.register(peer_addr).await;
+    let session_id = handle.id.clone();
+    let shutdown_rx = handle.shutdown_rx.clone();
+    tracing::info!("Registered session {} for {}", session_id, peer_addr);
+
+    sm.update_status(&session_id, SessionStatus::Active).await;
+
+    ws::relay_lazy(
+        socket,
+        &state.copilot_host,
+        state.copilot_port,
+        sm.clone(),
+        &session_id,
+        shutdown_rx,
+    )
+    .await;
+
+    handle.touch().await;
+    sm.unregister(&session_id).await;
+    tracing::info!(
+        "Connection closed for {} (session {})",
+        peer_addr,
+        session_id
+    );
+}
+
+/// Hyper service adapter that wraps the axum Router for TLS connections,
+/// injecting ConnectInfo and converting between hyper and axum body types.
+#[derive(Clone)]
+struct TlsService {
+    router: Router,
+    peer_addr: SocketAddr,
+}
+
+impl hyper::service::Service<hyper::Request<hyper::body::Incoming>> for TlsService {
+    type Response = axum::http::Response<axum::body::Body>;
+    type Error = Infallible;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+    fn call(&self, req: hyper::Request<hyper::body::Incoming>) -> Self::Future {
+        let mut router = self.router.clone();
+        let peer_addr = self.peer_addr;
+        Box::pin(async move {
+            let (mut parts, body) = req.into_parts();
+            parts
+                .extensions
+                .insert(ConnectInfo(peer_addr));
+            let req =
+                axum::http::Request::from_parts(parts, axum::body::Body::new(body));
+            // Router is always ready; safe to call without poll_ready
+            tower::Service::call(&mut router, req).await
+        })
+    }
+}
+
+/// Serve the axum app over TLS using hyper-util for each connection.
+async fn serve_with_tls(
+    listener: tokio::net::TcpListener,
+    app: Router,
+    tls_acceptor: tokio_native_tls::TlsAcceptor,
+) -> anyhow::Result<()> {
+    use hyper_util::rt::{TokioExecutor, TokioIo};
+    use hyper_util::server::conn::auto;
+
+    loop {
+        let (tcp_stream, peer_addr) = listener.accept().await?;
+        let tls_acceptor = tls_acceptor.clone();
+        let app = app.clone();
+
+        tokio::spawn(async move {
+            let tls_stream = match tls_acceptor.accept(tcp_stream).await {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::error!("TLS handshake failed for {}: {}", peer_addr, e);
+                    return;
+                }
+            };
+            tracing::debug!("TLS handshake complete for {}", peer_addr);
+
+            let io = TokioIo::new(tls_stream);
+            let service = TlsService {
+                router: app,
+                peer_addr,
+            };
+
+            let builder = auto::Builder::new(TokioExecutor::new());
+            if let Err(e) = builder
+                .serve_connection_with_upgrades(io, service)
+                .await
+            {
+                tracing::error!("TLS connection error for {}: {}", peer_addr, e);
+            }
+        });
+    }
 }

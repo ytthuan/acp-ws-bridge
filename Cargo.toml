@@ -12,8 +12,11 @@ serde_json = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 clap = { version = "4", features = ["derive"] }
-axum = "0.7"
+axum = { version = "0.7", features = ["ws"] }
+tower = "0.5"
 tower-http = { version = "0.5", features = ["cors", "trace"] }
+hyper = { version = "1", features = ["server"] }
+hyper-util = { version = "0.1", features = ["tokio", "server-auto"] }
 native-tls = "0.2"
 tokio-native-tls = "0.3"
 rcgen = "0.13"

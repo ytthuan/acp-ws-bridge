@@ -8,7 +8,6 @@ mod session;
 mod tls;
 mod ws;
 
-use std::net::SocketAddr;
 use std::path::Path;
 use std::time::Duration;
 
@@ -84,11 +83,15 @@ async fn main() -> anyhow::Result<()> {
     };
 
     info!("ACP WebSocket Bridge starting...");
-    info!("WebSocket: {}:{}", config.listen_addr, config.ws_port);
+    info!("Server: {}:{} (REST API + WebSocket)", config.listen_addr, config.ws_port);
     info!(
         "Copilot CLI: {}:{}",
         config.copilot_host, config.copilot_port
     );
+
+    if config.api_port.is_some() {
+        info!("Note: --api-port is deprecated and ignored; REST API is now served on the same port as WebSocket");
+    }
 
     let session_manager = SessionManager::new();
 
@@ -97,26 +100,7 @@ async fn main() -> anyhow::Result<()> {
     let _idle_checker = spawn_idle_checker(session_manager.clone(), idle_timeout);
     info!("Idle session timeout: {}s", config.idle_timeout_secs);
 
-    // Spawn REST API server
-    let api_port = config.api_port.unwrap_or(config.ws_port + 1);
-    let api_addr = SocketAddr::from(([0, 0, 0, 0], api_port));
-    info!("REST API: http://{}:{}", config.listen_addr, api_port);
-
     let bridge = Bridge::new(config, session_manager);
-    let api_router = api::api_router(bridge.session_manager().clone());
-
-    tokio::spawn(async move {
-        match tokio::net::TcpListener::bind(api_addr).await {
-            Ok(listener) => {
-                if let Err(e) = axum::serve(listener, api_router).await {
-                    tracing::error!("REST API server error: {}", e);
-                }
-            }
-            Err(e) => {
-                tracing::warn!("REST API failed to bind port {}: {} (continuing without REST API)", api_port, e);
-            }
-        }
-    });
 
     bridge.run().await
 }
