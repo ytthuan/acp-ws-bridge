@@ -6,52 +6,73 @@ mod session;
 mod tls;
 mod ws;
 
+use std::net::SocketAddr;
+use std::path::Path;
+use std::time::Duration;
+
+use bridge::Bridge;
 use clap::Parser;
+use config::Config;
+use session::{SessionManager, spawn_idle_checker};
 use tracing::info;
-
-#[derive(Parser, Debug)]
-#[command(name = "acp-ws-bridge", about = "WebSocket bridge for GitHub Copilot CLI (ACP)")]
-struct Args {
-    /// Port to listen on for WebSocket connections
-    #[arg(short, long, default_value_t = 8443)]
-    port: u16,
-
-    /// Host to bind to
-    #[arg(long, default_value = "0.0.0.0")]
-    host: String,
-
-    /// Path to the Copilot CLI executable
-    #[arg(long, default_value = "github-copilot-cli")]
-    copilot_cli: String,
-
-    /// Enable TLS with auto-generated self-signed certificate
-    #[arg(long, default_value_t = true)]
-    tls: bool,
-}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let config = Config::parse();
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "acp_ws_bridge=info".into()),
+                .unwrap_or_else(|_| format!("acp_ws_bridge={}", config.log_level).into()),
         )
         .init();
 
-    let args = Args::parse();
+    // Generate self-signed cert and exit if requested
+    if config.generate_cert {
+        let cert_path = config.tls_cert.as_deref().unwrap_or("cert.pem");
+        let key_path = config.tls_key.as_deref().unwrap_or("key.pem");
+        let hostnames: Vec<String> = config
+            .cert_hostnames
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .collect();
+        tls::generate_self_signed_cert(Path::new(cert_path), Path::new(key_path), &hostnames)?;
+        info!(
+            "Generated self-signed certificate: {}, {}",
+            cert_path, key_path
+        );
+        return Ok(());
+    }
 
+    info!("ACP WebSocket Bridge starting...");
+    info!("WebSocket: {}:{}", config.listen_addr, config.ws_port);
     info!(
-        "ACP WebSocket Bridge starting on {}:{}",
-        args.host, args.port
+        "Copilot CLI: {}:{}",
+        config.copilot_host, config.copilot_port
     );
 
-    // TODO: Initialize bridge components
-    // 1. Generate or load TLS certificate
-    // 2. Start ACP connection to Copilot CLI
-    // 3. Start WebSocket server
-    // 4. Bridge messages between ACP and WebSocket
+    let session_manager = SessionManager::new();
 
-    info!("Bridge ready. Waiting for connections...");
+    // Spawn idle session checker
+    let idle_timeout = Duration::from_secs(config.idle_timeout_secs);
+    let _idle_checker = spawn_idle_checker(session_manager.clone(), idle_timeout);
+    info!("Idle session timeout: {}s", config.idle_timeout_secs);
 
-    Ok(())
+    // Spawn REST API server
+    let api_port = config.api_port.unwrap_or(config.ws_port + 1);
+    let api_router = api::api_router(session_manager.clone());
+    let api_addr = SocketAddr::from(([0, 0, 0, 0], api_port));
+    info!("REST API: http://{}:{}", config.listen_addr, api_port);
+
+    tokio::spawn(async move {
+        let listener = tokio::net::TcpListener::bind(api_addr)
+            .await
+            .expect("Failed to bind REST API port");
+        axum::serve(listener, api_router)
+            .await
+            .expect("REST API server error");
+    });
+
+    let bridge = Bridge::new(config, session_manager);
+    bridge.run().await
 }
