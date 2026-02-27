@@ -4,7 +4,6 @@ use tokio::net::TcpListener;
 use tokio_native_tls::TlsAcceptor;
 use tokio_tungstenite::accept_async;
 
-use crate::acp;
 use crate::config::Config;
 use crate::session::{SessionManager, SessionStatus};
 use crate::tls;
@@ -93,21 +92,19 @@ async fn handle_connection(
     session_id: &str,
     shutdown_rx: tokio::sync::watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
-    // Connect to Copilot CLI
-    let (tcp_reader, tcp_writer) = acp::connect(copilot_host, copilot_port).await?;
-    sm.update_status(session_id, SessionStatus::Active).await;
-
+    // First, complete the WebSocket handshake (no Copilot CLI connection yet).
+    // This allows "test connection" pings to succeed without Copilot CLI running.
     if let Some(acceptor) = tls_acceptor {
-        // TLS path: wrap TCP stream then upgrade to WebSocket
         let tls_stream = acceptor.accept(stream).await?;
         let ws_stream = accept_async(tls_stream).await?;
         tracing::info!("WSS handshake complete for {}", peer_addr);
-        ws::relay(ws_stream, tcp_reader, tcp_writer, sm, session_id, shutdown_rx).await;
+        sm.update_status(session_id, SessionStatus::Active).await;
+        ws::relay_lazy(ws_stream, copilot_host, copilot_port, sm, session_id, shutdown_rx).await;
     } else {
-        // Plain WebSocket path
         let ws_stream = accept_async(stream).await?;
         tracing::info!("WebSocket handshake complete for {}", peer_addr);
-        ws::relay(ws_stream, tcp_reader, tcp_writer, sm, session_id, shutdown_rx).await;
+        sm.update_status(session_id, SessionStatus::Active).await;
+        ws::relay_lazy(ws_stream, copilot_host, copilot_port, sm, session_id, shutdown_rx).await;
     }
 
     Ok(())
