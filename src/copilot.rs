@@ -69,7 +69,6 @@ impl CopilotProcess {
     }
 
     /// Spawn `copilot --acp --stdio` and return piped stdin/stdout.
-    #[allow(dead_code)]
     pub async fn spawn_stdio(
         copilot_path: &str,
         extra_args: &[String],

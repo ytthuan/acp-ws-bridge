@@ -62,7 +62,7 @@ pub struct Config {
     pub copilot_args: Vec<String>,
 
     /// Copilot CLI transport mode: "tcp" or "stdio"
-    #[arg(long, default_value = "tcp")]
+    #[arg(long, default_value = "stdio")]
     pub copilot_mode: String,
 }
 
@@ -88,7 +88,7 @@ mod tests {
         assert_eq!(config.copilot_path, "copilot");
         assert!(config.spawn_copilot);
         assert!(config.copilot_args.is_empty());
-        assert_eq!(config.copilot_mode, "tcp");
+        assert_eq!(config.copilot_mode, "stdio");
     }
 
     #[test]

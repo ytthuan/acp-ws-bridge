@@ -29,6 +29,9 @@ struct WsState {
     session_manager: SessionManager,
     copilot_host: String,
     copilot_port: u16,
+    copilot_mode: String,
+    copilot_path: String,
+    copilot_args: Vec<String>,
 }
 
 impl Bridge {
@@ -47,6 +50,9 @@ impl Bridge {
             session_manager: self.session_manager.clone(),
             copilot_host: self.config.copilot_host.clone(),
             copilot_port: self.config.copilot_port,
+            copilot_mode: self.config.copilot_mode.clone(),
+            copilot_path: self.config.copilot_path.clone(),
+            copilot_args: self.config.copilot_args.clone(),
         };
 
         // WebSocket-only router (REST API runs on a separate port)
@@ -110,15 +116,27 @@ async fn handle_ws_connection(
 
     sm.update_status(&session_id, SessionStatus::Active).await;
 
-    ws::relay_lazy(
-        socket,
-        &state.copilot_host,
-        state.copilot_port,
-        sm.clone(),
-        &session_id,
-        shutdown_rx,
-    )
-    .await;
+    if state.copilot_mode == "stdio" {
+        ws::relay_stdio(
+            socket,
+            &state.copilot_path,
+            &state.copilot_args,
+            sm.clone(),
+            &session_id,
+            shutdown_rx,
+        )
+        .await;
+    } else {
+        ws::relay_lazy(
+            socket,
+            &state.copilot_host,
+            state.copilot_port,
+            sm.clone(),
+            &session_id,
+            shutdown_rx,
+        )
+        .await;
+    }
 
     handle.touch().await;
     sm.unregister(&session_id).await;

@@ -50,14 +50,11 @@ async fn main() -> anyhow::Result<()> {
         info!("Copilot CLI auto-spawn disabled (--spawn-copilot false)");
         None
     } else if config.copilot_mode == "stdio" {
-        // Stdio mode requires a fundamentally different multiplexing architecture
-        // (single stdin/stdout shared across all WS clients). For now, skip spawning
-        // and require the user to manage the Copilot CLI process externally.
+        // In stdio mode, each WebSocket client spawns its own Copilot CLI process.
+        // No shared process needed at startup.
         info!(
-            "Copilot mode is 'stdio' — the bridge's TCP-relay architecture requires TCP mode. \
-             Skipping Copilot CLI spawn. Either use --copilot-mode tcp (default) or connect \
-             to an externally managed Copilot CLI instance on {}:{}.",
-            config.copilot_host, config.copilot_port
+            "Copilot mode is 'stdio' — each WebSocket client will spawn its own \
+             Copilot CLI process via stdin/stdout pipes."
         );
         None
     } else {

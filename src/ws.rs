@@ -9,6 +9,7 @@ use tokio::sync::{mpsc, watch};
 use tokio::time::Instant;
 
 use crate::acp::{JsonRpcMessage, NdjsonReader, NdjsonWriter};
+use crate::copilot::CopilotProcess;
 use crate::session::SessionManager;
 
 const PING_INTERVAL: Duration = Duration::from_secs(30);
@@ -224,6 +225,253 @@ pub async fn relay_lazy(
     drop(ws_tx_idle);
     drop(tcp_writer_clone);
     let _ = sink_task.await;
+}
+
+/// Relay messages between a WebSocket connection and a per-client Copilot CLI stdio process.
+/// Each WebSocket client gets its own `copilot --acp --stdio` child process, spawned lazily
+/// on the first inbound message.
+pub async fn relay_stdio(
+    ws_stream: WebSocket,
+    copilot_path: &str,
+    copilot_args: &[String],
+    sm: SessionManager,
+    session_id: &str,
+    shutdown_rx: watch::Receiver<bool>,
+) {
+    let (mut ws_sink, mut ws_stream_read) = ws_stream.split();
+
+    // Channel for outbound WebSocket messages
+    let (ws_tx, mut ws_rx) = mpsc::channel::<Message>(64);
+
+    // Sink task: forward channel messages to ws_sink
+    let sink_task = tokio::spawn(async move {
+        while let Some(msg) = ws_rx.recv().await {
+            if let Err(e) = ws_sink.send(msg).await {
+                tracing::error!("Failed to send to WebSocket: {}", e);
+                break;
+            }
+        }
+    });
+
+    let ws_tx_pong = ws_tx.clone();
+    let ws_tx_ping = ws_tx.clone();
+    let ws_tx_idle = ws_tx.clone();
+    let sm_clone = sm.clone();
+    let sid = session_id.to_string();
+    let copilot_path = copilot_path.to_string();
+    let copilot_args = copilot_args.to_vec();
+    let mut shutdown_rx = shutdown_rx;
+
+    let last_pong = Arc::new(tokio::sync::Mutex::new(Instant::now()));
+    let last_pong_reader = last_pong.clone();
+    let mut ping_interval = tokio::time::interval(PING_INTERVAL);
+
+    // State for the lazy stdio child process
+    let stdio_writer: Arc<tokio::sync::Mutex<Option<tokio::io::BufWriter<tokio::process::ChildStdin>>>> =
+        Arc::new(tokio::sync::Mutex::new(None));
+    let stdio_writer_clone = stdio_writer.clone();
+
+    // Hold the child process so it lives as long as the connection
+    let child_process: Arc<tokio::sync::Mutex<Option<CopilotProcess>>> =
+        Arc::new(tokio::sync::Mutex::new(None));
+    let child_process_clone = child_process.clone();
+
+    tokio::select! {
+        // WS → stdio: read from WebSocket, spawn child lazily, write to stdin
+        _ = async {
+            while let Some(msg) = ws_stream_read.next().await {
+                match msg {
+                    Ok(Message::Text(text)) => {
+                        let trimmed = text.trim();
+                        if trimmed.is_empty() {
+                            continue;
+                        }
+
+                        sm_clone.record_activity(&sid).await;
+
+                        if let Some(method) = extract_method(trimmed) {
+                            if method == "session/prompt" {
+                                sm_clone.increment_prompts(&sid).await;
+                            }
+                        }
+
+                        // Lazy spawn: start stdio child process on first real message
+                        {
+                            let mut writer_guard = stdio_writer.lock().await;
+                            if writer_guard.is_none() {
+                                match CopilotProcess::spawn_stdio(&copilot_path, &copilot_args).await {
+                                    Ok((proc, crate::copilot::CopilotTransport::Stdio { stdin, stdout })) => {
+                                        *writer_guard = Some(tokio::io::BufWriter::new(stdin));
+                                        *child_process.lock().await = Some(proc);
+                                        tracing::info!("Stdio Copilot CLI process spawned for session {}", sid);
+
+                                        // Spawn stdout reader task
+                                        let ws_tx_stdout = ws_tx.clone();
+                                        let sm_stdout = sm_clone.clone();
+                                        let sid_stdout = sid.clone();
+                                        tokio::spawn(async move {
+                                            stdio_reader_task(stdout, ws_tx_stdout, sm_stdout, &sid_stdout).await;
+                                        });
+                                    }
+                                    Ok((_, crate::copilot::CopilotTransport::Tcp { .. })) => {
+                                        // Should never happen when calling spawn_stdio
+                                        tracing::error!("spawn_stdio returned TCP transport unexpectedly");
+                                        break;
+                                    }
+                                    Err(e) => {
+                                        tracing::error!("Failed to spawn Copilot CLI (stdio): {}", e);
+                                        let error_msg = format!(
+                                            r#"{{"jsonrpc":"2.0","error":{{"code":-32000,"message":"Bridge: failed to spawn Copilot CLI: {}"}}}}"#,
+                                            e.to_string().replace('"', "'")
+                                        );
+                                        let _ = ws_tx.send(Message::Text(error_msg)).await;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
+                        // Write to stdin
+                        let mut writer_guard = stdio_writer.lock().await;
+                        if let Some(ref mut writer) = *writer_guard {
+                            use tokio::io::AsyncWriteExt;
+                            // Validate JSON before sending
+                            if serde_json::from_str::<serde_json::Value>(trimmed).is_err() {
+                                tracing::warn!("WS→stdio: invalid JSON, skipping: {}", truncate(trimmed, 100));
+                                continue;
+                            }
+                            let mut line = trimmed.to_string();
+                            line.push('\n');
+                            if let Err(e) = writer.write_all(line.as_bytes()).await {
+                                tracing::error!("Failed to write to stdin: {}", e);
+                                break;
+                            }
+                            if let Err(e) = writer.flush().await {
+                                tracing::error!("Failed to flush stdin: {}", e);
+                                break;
+                            }
+                            tracing::debug!("WS→stdio: {}", truncate(trimmed, 200));
+                        }
+                    }
+                    Ok(Message::Close(_)) => {
+                        tracing::info!("WebSocket client sent close frame");
+                        break;
+                    }
+                    Ok(Message::Ping(data)) => {
+                        let _ = ws_tx_pong.send(Message::Pong(data)).await;
+                    }
+                    Ok(Message::Pong(_)) => {
+                        *last_pong_reader.lock().await = Instant::now();
+                        tracing::trace!("Pong received");
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        tracing::error!("WebSocket read error: {}", e);
+                        break;
+                    }
+                }
+            }
+        } => {
+            tracing::info!("WS→stdio relay ended");
+        },
+
+        // Periodic WebSocket ping and pong-timeout check
+        _ = async {
+            loop {
+                ping_interval.tick().await;
+                let elapsed = Instant::now().duration_since(*last_pong.lock().await);
+                if elapsed > PONG_TIMEOUT {
+                    tracing::warn!("No pong received in {:.0}s — connection presumed dead", elapsed.as_secs_f64());
+                    break;
+                }
+                if ws_tx_ping.send(Message::Ping(vec![])).await.is_err() {
+                    break;
+                }
+                tracing::trace!("Ping sent");
+            }
+        } => {
+            tracing::info!("Ping/pong keepalive ended — closing connection");
+        },
+
+        // Idle session timeout
+        _ = async {
+            while shutdown_rx.changed().await.is_ok() {
+                if *shutdown_rx.borrow() {
+                    break;
+                }
+            }
+        } => {
+            tracing::info!(session_id = session_id, "Session idle timeout — sending close frame");
+            let close = Message::Close(Some(CloseFrame {
+                code: 1001,
+                reason: "idle timeout".into(),
+            }));
+            let _ = ws_tx_idle.send(close).await;
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        },
+    }
+
+    // Cleanup: drop the child process (triggers kill via Drop impl)
+    drop(ws_tx);
+    drop(ws_tx_pong);
+    drop(ws_tx_ping);
+    drop(ws_tx_idle);
+    drop(stdio_writer_clone);
+    drop(child_process_clone);
+    let _ = sink_task.await;
+}
+
+/// Background task that reads NDJSON lines from a child process stdout and forwards to WebSocket.
+async fn stdio_reader_task(
+    mut stdout: tokio::io::BufReader<tokio::process::ChildStdout>,
+    ws_tx: mpsc::Sender<Message>,
+    sm: SessionManager,
+    session_id: &str,
+) {
+    use tokio::io::AsyncBufReadExt;
+    let mut line = String::new();
+    loop {
+        line.clear();
+        match stdout.read_line(&mut line).await {
+            Ok(0) => {
+                tracing::info!("Copilot CLI stdout closed (EOF)");
+                break;
+            }
+            Ok(_) => {
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                // Validate JSON
+                if serde_json::from_str::<serde_json::Value>(trimmed).is_err() {
+                    tracing::warn!("stdio→WS: non-JSON line from Copilot CLI, skipping: {}", truncate(trimmed, 200));
+                    continue;
+                }
+
+                tracing::debug!("stdio→WS: {}", truncate(trimmed, 200));
+                sm.record_activity(session_id).await;
+
+                if let Some(method) = extract_method(trimmed) {
+                    if method == "session/update" {
+                        sm.increment_messages(session_id).await;
+                    }
+                }
+
+                if let Some(copilot_sid) = extract_session_id_from_result(trimmed) {
+                    tracing::info!("Captured copilot session ID: {}", copilot_sid);
+                    sm.set_copilot_session_id(session_id, copilot_sid).await;
+                }
+
+                if ws_tx.send(Message::Text(trimmed.to_string())).await.is_err() {
+                    break;
+                }
+            }
+            Err(e) => {
+                tracing::error!("Copilot CLI stdout read error: {}", e);
+                break;
+            }
+        }
+    }
 }
 
 /// Background task that reads NDJSON lines from TCP and forwards them.
