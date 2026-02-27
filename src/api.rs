@@ -49,6 +49,23 @@ async fn get_session(
         .ok_or(StatusCode::NOT_FOUND)
 }
 
+/// GET /api/sessions/:id/commands — Get cached available_commands for a session
+async fn get_session_commands(
+    State(state): State<ApiState>,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    // Verify session exists
+    if state.session_manager.get_session(&id).await.is_none() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    let commands = state
+        .session_manager
+        .get_available_commands(&id)
+        .await
+        .unwrap_or(serde_json::json!([]));
+    Ok(Json(commands))
+}
+
 /// DELETE /api/sessions/:id — Delete a session
 async fn delete_session(
     State(state): State<ApiState>,
@@ -114,6 +131,7 @@ pub fn api_router(session_manager: SessionManager) -> Router {
             "/api/sessions/:id",
             get(get_session).delete(delete_session),
         )
+        .route("/api/sessions/:id/commands", get(get_session_commands))
         .route("/api/stats", get(get_stats))
         .route("/api/history/sessions", get(list_history_sessions))
         .route("/api/history/sessions/:id", get(get_history_session))
@@ -286,5 +304,49 @@ mod tests {
         assert_eq!(json["idle_sessions"], 1);
         assert_eq!(json["total_prompts"], 1);
         assert_eq!(json["total_messages"], 2);
+    }
+
+    #[tokio::test]
+    async fn test_get_session_commands_not_found() {
+        let app = test_app();
+        let req = Request::builder()
+            .uri("/api/sessions/nonexistent/commands")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_get_session_commands_empty() {
+        let sm = SessionManager::new();
+        let info = sm.create_session().await;
+        let app = api_router(sm);
+        let req = Request::builder()
+            .uri(format!("/api/sessions/{}/commands", info.id))
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json = body_json(resp.into_body()).await;
+        assert_eq!(json, serde_json::json!([]));
+    }
+
+    #[tokio::test]
+    async fn test_get_session_commands_with_data() {
+        let sm = SessionManager::new();
+        let info = sm.create_session().await;
+        let cmds = serde_json::json!([{"name": "explain"}, {"name": "fix"}]);
+        sm.set_available_commands(&info.id, cmds.clone()).await;
+
+        let app = api_router(sm);
+        let req = Request::builder()
+            .uri(format!("/api/sessions/{}/commands", info.id))
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json = body_json(resp.into_body()).await;
+        assert_eq!(json, cmds);
     }
 }

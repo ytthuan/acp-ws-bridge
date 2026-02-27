@@ -41,6 +41,8 @@ struct SessionEntry {
     pub last_activity_instant: Instant,
     /// Send `true` to signal the relay task to shut down.
     shutdown_tx: watch::Sender<bool>,
+    /// Cached available_commands from ACP session/update notifications.
+    pub available_commands: Option<serde_json::Value>,
 }
 
 /// Aggregate statistics across all sessions.
@@ -104,6 +106,7 @@ impl SessionManager {
             info,
             last_activity_instant: Instant::now(),
             shutdown_tx,
+            available_commands: None,
         };
         self.sessions.lock().await.insert(id.clone(), entry);
         tracing::info!(session_id = %id, %peer_addr, "Session registered");
@@ -139,6 +142,7 @@ impl SessionManager {
             info: info.clone(),
             last_activity_instant: Instant::now(),
             shutdown_tx,
+            available_commands: None,
         };
         self.sessions.lock().await.insert(id, entry);
         info
@@ -207,6 +211,22 @@ impl SessionManager {
         if let Some(entry) = self.sessions.lock().await.get_mut(id) {
             entry.info.copilot_session_id = Some(copilot_id);
         }
+    }
+
+    /// Store available_commands observed from ACP session/update notifications.
+    pub async fn set_available_commands(&self, id: &str, commands: serde_json::Value) {
+        if let Some(entry) = self.sessions.lock().await.get_mut(id) {
+            entry.available_commands = Some(commands);
+        }
+    }
+
+    /// Get cached available_commands for a session.
+    pub async fn get_available_commands(&self, id: &str) -> Option<serde_json::Value> {
+        self.sessions
+            .lock()
+            .await
+            .get(id)
+            .and_then(|e| e.available_commands.clone())
     }
 
     /// Delete a session.
@@ -421,6 +441,24 @@ mod tests {
         sm.set_copilot_session_id(&info.id, "copilot-123".to_string()).await;
         let updated = sm.get_session(&info.id).await.unwrap();
         assert_eq!(updated.copilot_session_id.as_deref(), Some("copilot-123"));
+    }
+
+    #[tokio::test]
+    async fn test_available_commands() {
+        let sm = SessionManager::new();
+        let info = sm.create_session().await;
+
+        // Initially none
+        assert!(sm.get_available_commands(&info.id).await.is_none());
+
+        // Set commands
+        let cmds = serde_json::json!([{"name": "explain"}, {"name": "fix"}]);
+        sm.set_available_commands(&info.id, cmds.clone()).await;
+        let fetched = sm.get_available_commands(&info.id).await.unwrap();
+        assert_eq!(fetched, cmds);
+
+        // Nonexistent session returns None
+        assert!(sm.get_available_commands("nonexistent").await.is_none());
     }
 
     #[tokio::test]

@@ -30,6 +30,30 @@ fn extract_session_id_from_result(json: &str) -> Option<String> {
         .and_then(|s| s.as_str().map(String::from))
 }
 
+/// Extract available_commands from an ACP session/update notification
+/// with type "available_commands_update". Returns the commands value if found.
+fn extract_available_commands(json: &str) -> Option<serde_json::Value> {
+    let val: serde_json::Value = serde_json::from_str(json).ok()?;
+    if val.get("method")?.as_str()? != "session/update" {
+        return None;
+    }
+    let params = val.get("params")?;
+    // Format: params.update.type == "available_commands_update"
+    if let Some(update) = params.get("update") {
+        if update.get("type").and_then(|t| t.as_str()) == Some("available_commands_update") {
+            return update.get("commands").cloned();
+        }
+    }
+    // Alt format: params.type == "available_commands_update"
+    if params.get("type").and_then(|t| t.as_str()) == Some("available_commands_update") {
+        return params
+            .get("available_commands")
+            .or_else(|| params.get("commands"))
+            .cloned();
+    }
+    None
+}
+
 /// Relay messages bidirectionally between a WebSocket connection and an NDJSON TCP connection.
 /// The TCP connection to Copilot CLI is established **lazily** — only when the first WebSocket
 /// message arrives. This allows "test connection" (ping/pong) to succeed without Copilot CLI running.
@@ -462,6 +486,11 @@ async fn stdio_reader_task(
                     sm.set_copilot_session_id(session_id, copilot_sid).await;
                 }
 
+                if let Some(commands) = extract_available_commands(trimmed) {
+                    tracing::info!("Captured available_commands for session {}", session_id);
+                    sm.set_available_commands(session_id, commands).await;
+                }
+
                 if ws_tx.send(Message::Text(trimmed.to_string())).await.is_err() {
                     break;
                 }
@@ -497,6 +526,11 @@ async fn tcp_reader_task(
                 if let Some(copilot_sid) = extract_session_id_from_result(&line) {
                     tracing::info!("Captured copilot session ID: {}", copilot_sid);
                     sm.set_copilot_session_id(session_id, copilot_sid).await;
+                }
+
+                if let Some(commands) = extract_available_commands(&line) {
+                    tracing::info!("Captured available_commands for session {}", session_id);
+                    sm.set_available_commands(session_id, commands).await;
                 }
 
                 if ws_tx.send(Message::Text(line)).await.is_err() {
@@ -594,5 +628,36 @@ mod tests {
     #[test]
     fn test_truncate_empty() {
         assert_eq!(truncate("", 5), "");
+    }
+
+    #[test]
+    fn test_extract_available_commands_nested_update() {
+        let json = r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{"type":"available_commands_update","commands":[{"name":"explain"},{"name":"fix"}]}}}"#;
+        let cmds = extract_available_commands(json).unwrap();
+        assert_eq!(cmds, serde_json::json!([{"name":"explain"},{"name":"fix"}]));
+    }
+
+    #[test]
+    fn test_extract_available_commands_flat_format() {
+        let json = r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","type":"available_commands_update","available_commands":["cmd1","cmd2"]}}"#;
+        let cmds = extract_available_commands(json).unwrap();
+        assert_eq!(cmds, serde_json::json!(["cmd1","cmd2"]));
+    }
+
+    #[test]
+    fn test_extract_available_commands_not_commands_update() {
+        let json = r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","type":"turn_update","data":{}}}"#;
+        assert!(extract_available_commands(json).is_none());
+    }
+
+    #[test]
+    fn test_extract_available_commands_wrong_method() {
+        let json = r#"{"jsonrpc":"2.0","method":"session/prompt","params":{}}"#;
+        assert!(extract_available_commands(json).is_none());
+    }
+
+    #[test]
+    fn test_extract_available_commands_invalid_json() {
+        assert!(extract_available_commands("not json").is_none());
     }
 }
