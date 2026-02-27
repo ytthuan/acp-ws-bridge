@@ -20,6 +20,7 @@ pub struct HistorySession {
     pub repository: Option<String>,
     pub branch: Option<String>,
     pub summary: Option<String>,
+    pub preview: Option<String>,
     pub created_at: Option<String>,
     pub updated_at: Option<String>,
     pub turn_count: i64,
@@ -53,7 +54,8 @@ pub fn list_sessions() -> anyhow::Result<Vec<HistorySession>> {
     let conn = Connection::open(session_store_path())?;
     let mut stmt = conn.prepare(
         "SELECT s.id, s.cwd, s.repository, s.branch, s.summary, s.created_at, s.updated_at,
-                COALESCE((SELECT COUNT(*) FROM turns t WHERE t.session_id = s.id), 0) as turn_count
+                COALESCE((SELECT COUNT(*) FROM turns t WHERE t.session_id = s.id), 0) as turn_count,
+                (SELECT substr(t2.user_message, 1, 100) FROM turns t2 WHERE t2.session_id = s.id AND t2.user_message IS NOT NULL AND t2.user_message != '' ORDER BY t2.turn_index LIMIT 1) as preview
          FROM sessions s
          ORDER BY s.created_at DESC",
     )?;
@@ -65,6 +67,7 @@ pub fn list_sessions() -> anyhow::Result<Vec<HistorySession>> {
                 repository: row.get(2)?,
                 branch: row.get(3)?,
                 summary: row.get(4)?,
+                preview: row.get(8)?,
                 created_at: row.get(5)?,
                 updated_at: row.get(6)?,
                 turn_count: row.get(7)?,
