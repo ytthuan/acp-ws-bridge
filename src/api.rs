@@ -74,10 +74,176 @@ pub fn api_router(session_manager: SessionManager) -> Router {
         .route("/health", get(health))
         .route("/api/sessions", get(list_sessions))
         .route(
-            "/api/sessions/{id}",
+            "/api/sessions/:id",
             get(get_session).delete(delete_session),
         )
         .route("/api/stats", get(get_stats))
         .layer(CorsLayer::permissive())
         .with_state(state)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::Request;
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+
+    fn test_app() -> Router {
+        api_router(SessionManager::new())
+    }
+
+    async fn body_json(body: Body) -> serde_json::Value {
+        let bytes = body.collect().await.unwrap().to_bytes();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_health_endpoint() {
+        let app = test_app();
+        let req = Request::builder()
+            .uri("/health")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let json = body_json(resp.into_body()).await;
+        assert_eq!(json["status"], "ok");
+        assert!(json["version"].is_string());
+        assert!(json["uptime_secs"].is_number());
+    }
+
+    #[tokio::test]
+    async fn test_list_sessions_empty() {
+        let app = test_app();
+        let req = Request::builder()
+            .uri("/api/sessions")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let json = body_json(resp.into_body()).await;
+        assert_eq!(json, serde_json::json!([]));
+    }
+
+    #[tokio::test]
+    async fn test_get_session_not_found() {
+        let app = test_app();
+        let req = Request::builder()
+            .uri("/api/sessions/nonexistent")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_delete_session_not_found() {
+        let app = test_app();
+        let req = Request::builder()
+            .method("DELETE")
+            .uri("/api/sessions/nonexistent")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_get_stats_empty() {
+        let app = test_app();
+        let req = Request::builder()
+            .uri("/api/stats")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let json = body_json(resp.into_body()).await;
+        assert_eq!(json["total_sessions"], 0);
+        assert_eq!(json["active_sessions"], 0);
+        assert_eq!(json["idle_sessions"], 0);
+        assert_eq!(json["total_prompts"], 0);
+        assert_eq!(json["total_messages"], 0);
+    }
+
+    #[tokio::test]
+    async fn test_list_sessions_with_data() {
+        let sm = SessionManager::new();
+        sm.create_session().await;
+        sm.create_session().await;
+
+        let app = api_router(sm);
+        let req = Request::builder()
+            .uri("/api/sessions")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let json = body_json(resp.into_body()).await;
+        assert_eq!(json.as_array().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_get_session_exists() {
+        let sm = SessionManager::new();
+        let info = sm.create_session().await;
+
+        let app = api_router(sm);
+        let req = Request::builder()
+            .uri(format!("/api/sessions/{}", info.id))
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let json = body_json(resp.into_body()).await;
+        assert_eq!(json["id"], info.id);
+    }
+
+    #[tokio::test]
+    async fn test_delete_session_exists() {
+        let sm = SessionManager::new();
+        let info = sm.create_session().await;
+
+        let app = api_router(sm);
+        let req = Request::builder()
+            .method("DELETE")
+            .uri(format!("/api/sessions/{}", info.id))
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn test_stats_with_sessions() {
+        let sm = SessionManager::new();
+        let s1 = sm.create_session().await;
+        let s2 = sm.create_session().await;
+        sm.update_status(&s1.id, crate::session::SessionStatus::Active).await;
+        sm.update_status(&s2.id, crate::session::SessionStatus::Idle).await;
+        sm.increment_prompts(&s1.id).await;
+        sm.increment_messages(&s1.id).await;
+        sm.increment_messages(&s1.id).await;
+
+        let app = api_router(sm);
+        let req = Request::builder()
+            .uri("/api/stats")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let json = body_json(resp.into_body()).await;
+        assert_eq!(json["total_sessions"], 2);
+        assert_eq!(json["active_sessions"], 1);
+        assert_eq!(json["idle_sessions"], 1);
+        assert_eq!(json["total_prompts"], 1);
+        assert_eq!(json["total_messages"], 2);
+    }
 }

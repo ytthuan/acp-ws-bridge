@@ -212,3 +212,77 @@ fn truncate(s: &str, max: usize) -> &str {
         &s[..max]
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_method_present() {
+        let json = r#"{"jsonrpc":"2.0","id":1,"method":"session/prompt","params":{}}"#;
+        assert_eq!(extract_method(json), Some("session/prompt".to_string()));
+    }
+
+    #[test]
+    fn test_extract_method_absent() {
+        let json = r#"{"jsonrpc":"2.0","id":1,"result":{}}"#;
+        assert_eq!(extract_method(json), None);
+    }
+
+    #[test]
+    fn test_extract_method_invalid_json() {
+        assert_eq!(extract_method("not json"), None);
+    }
+
+    #[test]
+    fn test_extract_method_notification() {
+        let json = r#"{"jsonrpc":"2.0","method":"session/update","params":{"data":"test"}}"#;
+        assert_eq!(extract_method(json), Some("session/update".to_string()));
+    }
+
+    #[test]
+    fn test_extract_session_id_from_result_present() {
+        let json = r#"{"jsonrpc":"2.0","id":1,"result":{"sessionId":"copilot-abc-123"}}"#;
+        assert_eq!(
+            extract_session_id_from_result(json),
+            Some("copilot-abc-123".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_session_id_from_result_absent() {
+        let json = r#"{"jsonrpc":"2.0","id":1,"result":{"status":"ok"}}"#;
+        assert_eq!(extract_session_id_from_result(json), None);
+    }
+
+    #[test]
+    fn test_extract_session_id_no_result() {
+        let json = r#"{"jsonrpc":"2.0","id":1,"method":"test"}"#;
+        assert_eq!(extract_session_id_from_result(json), None);
+    }
+
+    #[test]
+    fn test_extract_session_id_invalid_json() {
+        assert_eq!(extract_session_id_from_result("not json"), None);
+    }
+
+    #[test]
+    fn test_truncate_short_string() {
+        assert_eq!(truncate("hello", 10), "hello");
+    }
+
+    #[test]
+    fn test_truncate_exact_length() {
+        assert_eq!(truncate("hello", 5), "hello");
+    }
+
+    #[test]
+    fn test_truncate_long_string() {
+        assert_eq!(truncate("hello world", 5), "hello");
+    }
+
+    #[test]
+    fn test_truncate_empty() {
+        assert_eq!(truncate("", 5), "");
+    }
+}

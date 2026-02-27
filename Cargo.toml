@@ -14,10 +14,14 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 clap = { version = "4", features = ["derive"] }
 axum = "0.7"
 tower-http = { version = "0.5", features = ["cors", "trace"] }
-rustls = "0.23"
-tokio-rustls = "0.26"
+native-tls = "0.2"
+tokio-native-tls = "0.3"
 rcgen = "0.13"
-rustls-pemfile = "2"
 futures-util = "0.3"
 anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
+
+[dev-dependencies]
+tempfile = "3"
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"

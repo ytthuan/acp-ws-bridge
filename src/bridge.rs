@@ -1,7 +1,7 @@
 //! Bridge logic connecting ACP streams to WebSocket clients.
 
 use tokio::net::TcpListener;
-use tokio_rustls::TlsAcceptor;
+use tokio_native_tls::TlsAcceptor;
 use tokio_tungstenite::accept_async;
 
 use crate::acp;

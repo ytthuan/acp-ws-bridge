@@ -49,3 +49,73 @@ pub struct Config {
     #[arg(long, default_value = "info")]
     pub log_level: String,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn test_default_config() {
+        let config = Config::parse_from(["test"]);
+        assert_eq!(config.ws_port, 8765);
+        assert_eq!(config.copilot_port, 3000);
+        assert_eq!(config.copilot_host, "127.0.0.1");
+        assert_eq!(config.listen_addr, "0.0.0.0");
+        assert_eq!(config.idle_timeout_secs, 604800);
+        assert!(config.tls_cert.is_none());
+        assert!(config.tls_key.is_none());
+        assert!(config.api_port.is_none());
+        assert!(!config.generate_cert);
+        assert_eq!(config.cert_hostnames, "localhost,127.0.0.1");
+        assert_eq!(config.log_level, "info");
+    }
+
+    #[test]
+    fn test_custom_config() {
+        let config = Config::parse_from([
+            "test",
+            "--ws-port", "9999",
+            "--copilot-port", "4000",
+            "--copilot-host", "192.168.1.1",
+            "--listen-addr", "127.0.0.1",
+            "--idle-timeout-secs", "3600",
+            "--tls-cert", "/tmp/cert.pem",
+            "--tls-key", "/tmp/key.pem",
+            "--log-level", "debug",
+        ]);
+        assert_eq!(config.ws_port, 9999);
+        assert_eq!(config.copilot_port, 4000);
+        assert_eq!(config.copilot_host, "192.168.1.1");
+        assert_eq!(config.listen_addr, "127.0.0.1");
+        assert_eq!(config.idle_timeout_secs, 3600);
+        assert_eq!(config.tls_cert.as_deref(), Some("/tmp/cert.pem"));
+        assert_eq!(config.tls_key.as_deref(), Some("/tmp/key.pem"));
+        assert_eq!(config.log_level, "debug");
+    }
+
+    #[test]
+    fn test_api_port_default() {
+        let config = Config::parse_from(["test"]);
+        // api_port defaults to None, meaning ws_port + 1 is used at runtime
+        assert!(config.api_port.is_none());
+    }
+
+    #[test]
+    fn test_api_port_explicit() {
+        let config = Config::parse_from(["test", "--api-port", "9000"]);
+        assert_eq!(config.api_port, Some(9000));
+    }
+
+    #[test]
+    fn test_generate_cert_flag() {
+        let config = Config::parse_from(["test", "--generate-cert"]);
+        assert!(config.generate_cert);
+    }
+
+    #[test]
+    fn test_cert_hostnames_custom() {
+        let config = Config::parse_from(["test", "--cert-hostnames", "example.com,10.0.0.1"]);
+        assert_eq!(config.cert_hostnames, "example.com,10.0.0.1");
+    }
+}

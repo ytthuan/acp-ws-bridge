@@ -285,3 +285,320 @@ pub fn spawn_idle_checker(
         }
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_create_session() {
+        let sm = SessionManager::new();
+        let info = sm.create_session().await;
+        assert_eq!(info.id, "remo_sess_001");
+        assert_eq!(info.status, SessionStatus::Connecting);
+        assert_eq!(info.prompt_count, 0);
+        assert_eq!(info.message_count, 0);
+        assert!(info.copilot_session_id.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_list_sessions() {
+        let sm = SessionManager::new();
+        assert!(sm.list_sessions().await.is_empty());
+
+        sm.create_session().await;
+        sm.create_session().await;
+        let sessions = sm.list_sessions().await;
+        assert_eq!(sessions.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_get_session() {
+        let sm = SessionManager::new();
+        let info = sm.create_session().await;
+        let fetched = sm.get_session(&info.id).await;
+        assert!(fetched.is_some());
+        assert_eq!(fetched.unwrap().id, info.id);
+
+        assert!(sm.get_session("nonexistent").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_delete_session() {
+        let sm = SessionManager::new();
+        let info = sm.create_session().await;
+        assert!(sm.delete_session(&info.id).await);
+        assert!(sm.list_sessions().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_delete_nonexistent_session() {
+        let sm = SessionManager::new();
+        assert!(!sm.delete_session("nonexistent").await);
+    }
+
+    #[tokio::test]
+    async fn test_session_status_updates() {
+        let sm = SessionManager::new();
+        let info = sm.create_session().await;
+        assert_eq!(info.status, SessionStatus::Connecting);
+
+        sm.update_status(&info.id, SessionStatus::Active).await;
+        let updated = sm.get_session(&info.id).await.unwrap();
+        assert_eq!(updated.status, SessionStatus::Active);
+
+        sm.update_status(&info.id, SessionStatus::Idle).await;
+        let updated = sm.get_session(&info.id).await.unwrap();
+        assert_eq!(updated.status, SessionStatus::Idle);
+
+        sm.update_status(&info.id, SessionStatus::Disconnected).await;
+        let updated = sm.get_session(&info.id).await.unwrap();
+        assert_eq!(updated.status, SessionStatus::Disconnected);
+
+        sm.update_status(&info.id, SessionStatus::Error).await;
+        let updated = sm.get_session(&info.id).await.unwrap();
+        assert_eq!(updated.status, SessionStatus::Error);
+    }
+
+    #[tokio::test]
+    async fn test_activity_tracking() {
+        let sm = SessionManager::new();
+        let info = sm.create_session().await;
+        let before = sm.get_session(&info.id).await.unwrap().last_activity.clone();
+
+        // Small delay to ensure timestamp changes
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        sm.record_activity(&info.id).await;
+
+        let after = sm.get_session(&info.id).await.unwrap().last_activity;
+        assert!(after >= before);
+    }
+
+    #[tokio::test]
+    async fn test_touch_alias() {
+        let sm = SessionManager::new();
+        let info = sm.create_session().await;
+        // touch and record_activity should both work
+        sm.touch(&info.id).await;
+        let session = sm.get_session(&info.id).await.unwrap();
+        assert!(!session.last_activity.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_prompt_count_increment() {
+        let sm = SessionManager::new();
+        let info = sm.create_session().await;
+        assert_eq!(info.prompt_count, 0);
+
+        sm.increment_prompts(&info.id).await;
+        sm.increment_prompts(&info.id).await;
+        sm.increment_prompts(&info.id).await;
+        let updated = sm.get_session(&info.id).await.unwrap();
+        assert_eq!(updated.prompt_count, 3);
+    }
+
+    #[tokio::test]
+    async fn test_message_count_increment() {
+        let sm = SessionManager::new();
+        let info = sm.create_session().await;
+        assert_eq!(info.message_count, 0);
+
+        sm.increment_messages(&info.id).await;
+        sm.increment_messages(&info.id).await;
+        let updated = sm.get_session(&info.id).await.unwrap();
+        assert_eq!(updated.message_count, 2);
+    }
+
+    #[tokio::test]
+    async fn test_set_copilot_session_id() {
+        let sm = SessionManager::new();
+        let info = sm.create_session().await;
+        assert!(info.copilot_session_id.is_none());
+
+        sm.set_copilot_session_id(&info.id, "copilot-123".to_string()).await;
+        let updated = sm.get_session(&info.id).await.unwrap();
+        assert_eq!(updated.copilot_session_id.as_deref(), Some("copilot-123"));
+    }
+
+    #[tokio::test]
+    async fn test_get_stats() {
+        let sm = SessionManager::new();
+
+        // Empty stats
+        let stats = sm.get_stats().await;
+        assert_eq!(stats.total_sessions, 0);
+        assert_eq!(stats.active_sessions, 0);
+        assert_eq!(stats.idle_sessions, 0);
+        assert_eq!(stats.total_prompts, 0);
+        assert_eq!(stats.total_messages, 0);
+
+        // Create sessions and update statuses
+        let s1 = sm.create_session().await;
+        let s2 = sm.create_session().await;
+        let s3 = sm.create_session().await;
+
+        sm.update_status(&s1.id, SessionStatus::Active).await;
+        sm.update_status(&s2.id, SessionStatus::Active).await;
+        sm.update_status(&s3.id, SessionStatus::Idle).await;
+
+        sm.increment_prompts(&s1.id).await;
+        sm.increment_prompts(&s2.id).await;
+        sm.increment_prompts(&s2.id).await;
+        sm.increment_messages(&s1.id).await;
+        sm.increment_messages(&s1.id).await;
+        sm.increment_messages(&s1.id).await;
+
+        let stats = sm.get_stats().await;
+        assert_eq!(stats.total_sessions, 3);
+        assert_eq!(stats.active_sessions, 2);
+        assert_eq!(stats.idle_sessions, 1);
+        assert_eq!(stats.total_prompts, 3);
+        assert_eq!(stats.total_messages, 3);
+    }
+
+    #[tokio::test]
+    async fn test_is_disconnected() {
+        let sm = SessionManager::new();
+        // Nonexistent session returns true (disconnected)
+        assert!(sm.is_disconnected("nonexistent").await);
+
+        let info = sm.create_session().await;
+        assert!(!sm.is_disconnected(&info.id).await);
+
+        sm.update_status(&info.id, SessionStatus::Disconnected).await;
+        assert!(sm.is_disconnected(&info.id).await);
+    }
+
+    #[tokio::test]
+    async fn test_register_and_unregister() {
+        let sm = SessionManager::new();
+        let addr: std::net::SocketAddr = "127.0.0.1:12345".parse().unwrap();
+        let handle = sm.register(addr).await;
+        assert!(sm.get_session(&handle.id).await.is_some());
+
+        sm.unregister(&handle.id).await;
+        assert!(sm.get_session(&handle.id).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_session_handle_touch() {
+        let sm = SessionManager::new();
+        let addr: std::net::SocketAddr = "127.0.0.1:12345".parse().unwrap();
+        let handle = sm.register(addr).await;
+        // Should not panic
+        handle.touch().await;
+        let session = sm.get_session(&handle.id).await.unwrap();
+        assert!(!session.last_activity.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_sequential_session_ids() {
+        let sm = SessionManager::new();
+        let s1 = sm.create_session().await;
+        let s2 = sm.create_session().await;
+        let s3 = sm.create_session().await;
+        assert_eq!(s1.id, "remo_sess_001");
+        assert_eq!(s2.id, "remo_sess_002");
+        assert_eq!(s3.id, "remo_sess_003");
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_session_access() {
+        let sm = SessionManager::new();
+        let info = sm.create_session().await;
+        let sid = info.id.clone();
+
+        // Spawn multiple tasks that concurrently modify the session
+        let mut handles = vec![];
+        for _ in 0..10 {
+            let sm_clone = sm.clone();
+            let sid_clone = sid.clone();
+            handles.push(tokio::spawn(async move {
+                sm_clone.increment_prompts(&sid_clone).await;
+                sm_clone.increment_messages(&sid_clone).await;
+                sm_clone.record_activity(&sid_clone).await;
+            }));
+        }
+
+        for h in handles {
+            h.await.unwrap();
+        }
+
+        let session = sm.get_session(&sid).await.unwrap();
+        assert_eq!(session.prompt_count, 10);
+        assert_eq!(session.message_count, 10);
+    }
+
+    #[tokio::test]
+    async fn test_disconnect_idle() {
+        let sm = SessionManager::new();
+        let info = sm.create_session().await;
+        sm.update_status(&info.id, SessionStatus::Active).await;
+
+        // With a zero timeout, every active session should be disconnected
+        sm.disconnect_idle(Duration::from_secs(0)).await;
+        let updated = sm.get_session(&info.id).await.unwrap();
+        assert_eq!(updated.status, SessionStatus::Disconnected);
+    }
+
+    #[tokio::test]
+    async fn test_disconnect_idle_skips_non_active() {
+        let sm = SessionManager::new();
+        let info = sm.create_session().await;
+        // Session is in Connecting state, should not be affected
+        sm.disconnect_idle(Duration::from_secs(0)).await;
+        let updated = sm.get_session(&info.id).await.unwrap();
+        assert_eq!(updated.status, SessionStatus::Connecting);
+    }
+
+    #[test]
+    fn test_session_status_serialization() {
+        let json = serde_json::to_string(&SessionStatus::Active).unwrap();
+        assert_eq!(json, "\"active\"");
+        let json = serde_json::to_string(&SessionStatus::Disconnected).unwrap();
+        assert_eq!(json, "\"disconnected\"");
+
+        let status: SessionStatus = serde_json::from_str("\"idle\"").unwrap();
+        assert_eq!(status, SessionStatus::Idle);
+    }
+
+    #[test]
+    fn test_session_info_serialization() {
+        let info = SessionInfo {
+            id: "test".to_string(),
+            copilot_session_id: Some("cop-1".to_string()),
+            status: SessionStatus::Active,
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+            last_activity: "2024-01-01T00:00:00Z".to_string(),
+            prompt_count: 5,
+            message_count: 10,
+        };
+        let json = serde_json::to_string(&info).unwrap();
+        let deserialized: SessionInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.id, "test");
+        assert_eq!(deserialized.prompt_count, 5);
+        assert_eq!(deserialized.message_count, 10);
+    }
+
+    #[test]
+    fn test_session_stats_serialization() {
+        let stats = SessionStats {
+            total_sessions: 3,
+            active_sessions: 2,
+            idle_sessions: 1,
+            total_prompts: 10,
+            total_messages: 20,
+        };
+        let json = serde_json::to_string(&stats).unwrap();
+        let deserialized: SessionStats = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.total_sessions, 3);
+        assert_eq!(deserialized.total_prompts, 10);
+    }
+
+    #[test]
+    fn test_session_manager_default() {
+        let sm = SessionManager::default();
+        // Should be equivalent to ::new()
+        let _ = sm; // just verify it compiles and doesn't panic
+    }
+}
