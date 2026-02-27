@@ -84,6 +84,14 @@ async fn get_history_session(Path(id): Path<String>) -> impl IntoResponse {
     }
 }
 
+/// GET /api/history/sessions/:id/turns — get session turns (explicit sub-route)
+async fn get_history_session_turns(Path(id): Path<String>) -> impl IntoResponse {
+    match history::get_session_turns(&id) {
+        Ok(turns) => Json(turns).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
 /// GET /api/history/stats — aggregate stats
 async fn get_history_stats() -> impl IntoResponse {
     match history::get_history_stats() {
@@ -109,6 +117,7 @@ pub fn api_router(session_manager: SessionManager) -> Router {
         .route("/api/stats", get(get_stats))
         .route("/api/history/sessions", get(list_history_sessions))
         .route("/api/history/sessions/:id", get(get_history_session))
+        .route("/api/history/sessions/:id/turns", get(get_history_session_turns))
         .route("/api/history/stats", get(get_history_stats))
         .layer(CorsLayer::permissive())
         .with_state(state)
