@@ -82,6 +82,7 @@ impl Bridge {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_connection(
     stream: tokio::net::TcpStream,
     peer_addr: std::net::SocketAddr,

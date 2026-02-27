@@ -46,15 +46,29 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Optionally spawn Copilot CLI as a child process
-    let _copilot_process = if config.spawn_copilot {
-        match copilot::CopilotProcess::spawn(
+    let _copilot_process = if !config.spawn_copilot {
+        info!("Copilot CLI auto-spawn disabled (--spawn-copilot false)");
+        None
+    } else if config.copilot_mode == "stdio" {
+        // Stdio mode requires a fundamentally different multiplexing architecture
+        // (single stdin/stdout shared across all WS clients). For now, skip spawning
+        // and require the user to manage the Copilot CLI process externally.
+        info!(
+            "Copilot mode is 'stdio' — the bridge's TCP-relay architecture requires TCP mode. \
+             Skipping Copilot CLI spawn. Either use --copilot-mode tcp (default) or connect \
+             to an externally managed Copilot CLI instance on {}:{}.",
+            config.copilot_host, config.copilot_port
+        );
+        None
+    } else {
+        match copilot::CopilotProcess::spawn_tcp(
             &config.copilot_path,
             config.copilot_port,
             &config.copilot_args,
         )
         .await
         {
-            Ok(proc) => {
+            Ok((proc, _transport)) => {
                 info!("Copilot CLI running on port {}", proc.port());
                 Some(proc)
             }
@@ -66,9 +80,6 @@ async fn main() -> anyhow::Result<()> {
                 None
             }
         }
-    } else {
-        info!("Copilot CLI auto-spawn disabled (--spawn-copilot false)");
-        None
     };
 
     info!("ACP WebSocket Bridge starting...");

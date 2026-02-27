@@ -4,6 +4,18 @@ use std::process::Stdio;
 use tokio::process::{Child, Command};
 use tokio::time::{sleep, Duration};
 
+/// Describes how the bridge communicates with the Copilot CLI process.
+#[allow(dead_code)]
+pub enum CopilotTransport {
+    /// TCP mode — Copilot CLI listens on a port, we connect to it.
+    Tcp { port: u16 },
+    /// Stdio mode — we own the child's stdin/stdout pipes directly.
+    Stdio {
+        stdin: tokio::process::ChildStdin,
+        stdout: tokio::io::BufReader<tokio::process::ChildStdout>,
+    },
+}
+
 /// Manages the Copilot CLI child process.
 pub struct CopilotProcess {
     child: Child,
@@ -11,14 +23,14 @@ pub struct CopilotProcess {
 }
 
 impl CopilotProcess {
-    /// Spawn `copilot --acp --port <port>` and wait until it's ready.
-    pub async fn spawn(
+    /// Spawn `copilot --acp --port <port>` (TCP mode) and wait until it's ready.
+    pub async fn spawn_tcp(
         copilot_path: &str,
         port: u16,
         extra_args: &[String],
-    ) -> anyhow::Result<Self> {
+    ) -> anyhow::Result<(Self, CopilotTransport)> {
         tracing::info!(
-            "Spawning Copilot CLI: {} --acp --port {}",
+            "Spawning Copilot CLI (TCP): {} --acp --port {} --model gpt-4.1",
             copilot_path,
             port
         );
@@ -53,7 +65,48 @@ impl CopilotProcess {
             tracing::info!("Copilot CLI ready on port {}", port);
         }
 
-        Ok(Self { child, port })
+        Ok((Self { child, port }, CopilotTransport::Tcp { port }))
+    }
+
+    /// Spawn `copilot --acp --stdio` and return piped stdin/stdout.
+    #[allow(dead_code)]
+    pub async fn spawn_stdio(
+        copilot_path: &str,
+        extra_args: &[String],
+    ) -> anyhow::Result<(Self, CopilotTransport)> {
+        tracing::info!(
+            "Spawning Copilot CLI (stdio): {} --acp --stdio --model gpt-4.1",
+            copilot_path,
+        );
+
+        let mut cmd = Command::new(copilot_path);
+        cmd.arg("--acp")
+            .arg("--stdio")
+            .args(extra_args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        let mut child = cmd.spawn().map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to spawn '{}': {}. Make sure Copilot CLI is installed and authenticated.",
+                copilot_path,
+                e
+            )
+        })?;
+
+        let stdin = child.stdin.take().expect("stdin must be piped");
+        let stdout = child.stdout.take().expect("stdout must be piped");
+
+        tracing::info!("Copilot CLI spawned in stdio mode (PID: {:?})", child.id());
+
+        Ok((
+            Self { child, port: 0 },
+            CopilotTransport::Stdio {
+                stdin,
+                stdout: tokio::io::BufReader::new(stdout),
+            },
+        ))
     }
 
     pub fn port(&self) -> u16 {

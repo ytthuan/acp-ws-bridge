@@ -166,17 +166,17 @@ pub async fn relay_lazy<S>(
         // TCP → WS: forward lines from the TCP reader task
         _ = async {
             while let Some(line) = tcp_line_rx.recv().await {
-                sm.record_activity(&session_id.to_string()).await;
+                sm.record_activity(session_id).await;
 
                 if let Some(method) = extract_method(&line) {
                     if method == "session/update" {
-                        sm.increment_messages(&session_id.to_string()).await;
+                        sm.increment_messages(session_id).await;
                     }
                 }
 
                 if let Some(copilot_sid) = extract_session_id_from_result(&line) {
                     tracing::info!("Captured copilot session ID: {}", copilot_sid);
-                    sm.set_copilot_session_id(&session_id.to_string(), copilot_sid).await;
+                    sm.set_copilot_session_id(session_id, copilot_sid).await;
                 }
 
                 if ws_tx.send(Message::Text(line)).await.is_err() {
