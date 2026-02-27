@@ -105,12 +105,16 @@ async fn main() -> anyhow::Result<()> {
     let api_router = api::api_router(bridge.session_manager().clone());
 
     tokio::spawn(async move {
-        let listener = tokio::net::TcpListener::bind(api_addr)
-            .await
-            .expect("Failed to bind REST API port");
-        axum::serve(listener, api_router)
-            .await
-            .expect("REST API server error");
+        match tokio::net::TcpListener::bind(api_addr).await {
+            Ok(listener) => {
+                if let Err(e) = axum::serve(listener, api_router).await {
+                    tracing::error!("REST API server error: {}", e);
+                }
+            }
+            Err(e) => {
+                tracing::warn!("REST API failed to bind port {}: {} (continuing without REST API)", api_port, e);
+            }
+        }
     });
 
     bridge.run().await

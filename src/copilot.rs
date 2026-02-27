@@ -30,7 +30,7 @@ impl CopilotProcess {
         extra_args: &[String],
     ) -> anyhow::Result<(Self, CopilotTransport)> {
         tracing::info!(
-            "Spawning Copilot CLI (TCP): {} --acp --port {} --model gpt-4.1",
+            "Spawning Copilot CLI (TCP): {} --acp --port {}",
             copilot_path,
             port
         );
@@ -75,7 +75,7 @@ impl CopilotProcess {
         extra_args: &[String],
     ) -> anyhow::Result<(Self, CopilotTransport)> {
         tracing::info!(
-            "Spawning Copilot CLI (stdio): {} --acp --stdio --model gpt-4.1",
+            "Spawning Copilot CLI (stdio): {} --acp --stdio",
             copilot_path,
         );
 
