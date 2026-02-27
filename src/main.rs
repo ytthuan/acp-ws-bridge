@@ -2,6 +2,7 @@ mod acp;
 mod api;
 mod bridge;
 mod config;
+mod copilot;
 mod session;
 mod tls;
 mod ws;
@@ -43,6 +44,32 @@ async fn main() -> anyhow::Result<()> {
         );
         return Ok(());
     }
+
+    // Optionally spawn Copilot CLI as a child process
+    let _copilot_process = if config.spawn_copilot {
+        match copilot::CopilotProcess::spawn(
+            &config.copilot_path,
+            config.copilot_port,
+            &config.copilot_args,
+        )
+        .await
+        {
+            Ok(proc) => {
+                info!("Copilot CLI running on port {}", proc.port());
+                Some(proc)
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to spawn Copilot CLI: {}. Bridge will still start — connect to an existing Copilot CLI instance manually.",
+                    e
+                );
+                None
+            }
+        }
+    } else {
+        info!("Copilot CLI auto-spawn disabled (--spawn-copilot false)");
+        None
+    };
 
     info!("ACP WebSocket Bridge starting...");
     info!("WebSocket: {}:{}", config.listen_addr, config.ws_port);

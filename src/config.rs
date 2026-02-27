@@ -48,6 +48,18 @@ pub struct Config {
     /// Log level
     #[arg(long, default_value = "info")]
     pub log_level: String,
+
+    /// Path to the copilot CLI executable
+    #[arg(long, default_value = "copilot")]
+    pub copilot_path: String,
+
+    /// Automatically spawn Copilot CLI as a child process
+    #[arg(long, default_value = "true")]
+    pub spawn_copilot: bool,
+
+    /// Extra arguments to pass to Copilot CLI
+    #[arg(long)]
+    pub copilot_args: Vec<String>,
 }
 
 #[cfg(test)]
@@ -69,6 +81,9 @@ mod tests {
         assert!(!config.generate_cert);
         assert_eq!(config.cert_hostnames, "localhost,127.0.0.1");
         assert_eq!(config.log_level, "info");
+        assert_eq!(config.copilot_path, "copilot");
+        assert!(config.spawn_copilot);
+        assert!(config.copilot_args.is_empty());
     }
 
     #[test]
