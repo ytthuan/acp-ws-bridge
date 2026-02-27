@@ -60,9 +60,11 @@ async fn main() -> anyhow::Result<()> {
 
     // Spawn REST API server
     let api_port = config.api_port.unwrap_or(config.ws_port + 1);
-    let api_router = api::api_router(session_manager.clone());
     let api_addr = SocketAddr::from(([0, 0, 0, 0], api_port));
     info!("REST API: http://{}:{}", config.listen_addr, api_port);
+
+    let bridge = Bridge::new(config, session_manager);
+    let api_router = api::api_router(bridge.session_manager().clone());
 
     tokio::spawn(async move {
         let listener = tokio::net::TcpListener::bind(api_addr)
@@ -73,6 +75,5 @@ async fn main() -> anyhow::Result<()> {
             .expect("REST API server error");
     });
 
-    let bridge = Bridge::new(config, session_manager);
     bridge.run().await
 }

@@ -116,6 +116,8 @@ impl SessionManager {
     }
 
     /// Create a new session (without shutdown signaling), returns the session info.
+    /// Used in tests as a simpler alternative to `register()`.
+    #[cfg(test)]
     pub async fn create_session(&self) -> SessionInfo {
         let (shutdown_tx, _shutdown_rx) = watch::channel(false);
         let seq = self.counter.fetch_add(1, Ordering::Relaxed) + 1;
@@ -235,6 +237,7 @@ impl SessionManager {
     }
 
     /// Check if a session has been marked as disconnected.
+    #[cfg(test)]
     pub async fn is_disconnected(&self, id: &str) -> bool {
         self.sessions
             .lock()

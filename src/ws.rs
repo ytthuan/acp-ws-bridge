@@ -5,14 +5,14 @@ use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use tokio::time::Instant;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::WebSocketStream;
 
-use crate::acp::{NdjsonReader, NdjsonWriter};
+use crate::acp::{JsonRpcMessage, NdjsonReader, NdjsonWriter};
 use crate::session::SessionManager;
 
 const PING_INTERVAL: Duration = Duration::from_secs(30);
@@ -20,15 +20,15 @@ const PONG_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Extract the ACP method name from a JSON string, if present.
 fn extract_method(json: &str) -> Option<String> {
-    serde_json::from_str::<serde_json::Value>(json)
+    serde_json::from_str::<JsonRpcMessage>(json)
         .ok()
-        .and_then(|v| v.get("method")?.as_str().map(String::from))
+        .and_then(|msg| msg.method)
 }
 
 /// Extract the copilot session ID from an ACP session/new response result.
 fn extract_session_id_from_result(json: &str) -> Option<String> {
-    let v: serde_json::Value = serde_json::from_str(json).ok()?;
-    v.get("result")?
+    let msg: JsonRpcMessage = serde_json::from_str(json).ok()?;
+    msg.result?
         .get("sessionId")
         .and_then(|s| s.as_str().map(String::from))
 }
@@ -41,6 +41,7 @@ pub async fn relay<S>(
     mut tcp_writer: NdjsonWriter,
     sm: SessionManager,
     session_id: &str,
+    shutdown_rx: watch::Receiver<bool>,
 ) where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
@@ -65,8 +66,7 @@ pub async fn relay<S>(
     let sid_ws = session_id.to_string();
     let sm_tcp = sm.clone();
     let sid_tcp = session_id.to_string();
-    let sm_idle = sm.clone();
-    let sid_idle = session_id.to_string();
+    let mut shutdown_rx = shutdown_rx;
 
     // Track when we last received a pong (or any client data)
     let last_pong = Arc::new(tokio::sync::Mutex::new(Instant::now()));
@@ -177,12 +177,10 @@ pub async fn relay<S>(
             tracing::info!("Ping/pong keepalive ended — closing connection");
         },
 
-        // Idle session timeout: poll the session manager for disconnect status
+        // Idle session timeout: watch for shutdown signal from session manager
         _ = async {
-            let mut check = tokio::time::interval(Duration::from_secs(5));
-            loop {
-                check.tick().await;
-                if sm_idle.is_disconnected(&sid_idle).await {
+            while shutdown_rx.changed().await.is_ok() {
+                if *shutdown_rx.borrow() {
                     break;
                 }
             }

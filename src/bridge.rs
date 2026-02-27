@@ -60,20 +60,23 @@ impl Bridge {
             let sm = self.session_manager.clone();
 
             tokio::spawn(async move {
-                // Create a session for this connection
-                let session_info = sm.create_session().await;
-                let session_id = session_info.id.clone();
-                tracing::info!("Created session {} for {}", session_id, peer_addr);
+                // Register a session for this connection (with shutdown signaling)
+                let handle = sm.register(peer_addr).await;
+                let session_id = handle.id.clone();
+                let shutdown_rx = handle.shutdown_rx.clone();
+                tracing::info!("Registered session {} for {}", session_id, peer_addr);
 
                 if let Err(e) =
-                    handle_connection(stream, peer_addr, &copilot_host, copilot_port, tls_acceptor, sm.clone(), &session_id)
+                    handle_connection(stream, peer_addr, &copilot_host, copilot_port, tls_acceptor, sm.clone(), &session_id, shutdown_rx)
                         .await
                 {
                     tracing::error!("Connection error for {} (session {}): {}", peer_addr, session_id, e);
                     sm.update_status(&session_id, SessionStatus::Error).await;
                 }
 
-                sm.update_status(&session_id, SessionStatus::Disconnected).await;
+                // Record final activity and clean up the session
+                handle.touch().await;
+                sm.unregister(&session_id).await;
                 tracing::info!("Connection closed for {} (session {})", peer_addr, session_id);
             });
         }
@@ -88,6 +91,7 @@ async fn handle_connection(
     tls_acceptor: Option<TlsAcceptor>,
     sm: SessionManager,
     session_id: &str,
+    shutdown_rx: tokio::sync::watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
     // Connect to Copilot CLI
     let (tcp_reader, tcp_writer) = acp::connect(copilot_host, copilot_port).await?;
@@ -98,12 +102,12 @@ async fn handle_connection(
         let tls_stream = acceptor.accept(stream).await?;
         let ws_stream = accept_async(tls_stream).await?;
         tracing::info!("WSS handshake complete for {}", peer_addr);
-        ws::relay(ws_stream, tcp_reader, tcp_writer, sm, session_id).await;
+        ws::relay(ws_stream, tcp_reader, tcp_writer, sm, session_id, shutdown_rx).await;
     } else {
         // Plain WebSocket path
         let ws_stream = accept_async(stream).await?;
         tracing::info!("WebSocket handshake complete for {}", peer_addr);
-        ws::relay(ws_stream, tcp_reader, tcp_writer, sm, session_id).await;
+        ws::relay(ws_stream, tcp_reader, tcp_writer, sm, session_id, shutdown_rx).await;
     }
 
     Ok(())
