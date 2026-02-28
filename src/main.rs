@@ -81,10 +81,14 @@ async fn main() -> anyhow::Result<()> {
 
     info!("ACP WebSocket Bridge starting...");
     info!("WebSocket: {}:{}", config.listen_addr, config.ws_port);
-    info!(
-        "Copilot CLI: {}:{}",
-        config.copilot_host, config.copilot_port
-    );
+    if config.copilot_mode == "stdio" {
+        info!("Copilot CLI mode: stdio (per-client process)");
+    } else {
+        info!(
+            "Copilot CLI: {}:{}",
+            config.copilot_host, config.copilot_port
+        );
+    }
 
     let session_manager = SessionManager::new();
 
