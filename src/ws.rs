@@ -97,9 +97,6 @@ pub async fn relay_lazy(
         Arc::new(tokio::sync::Mutex::new(None));
     let tcp_writer_clone = tcp_writer.clone();
 
-    // Channel to receive TCP→WS lines once the TCP connection is established
-    let (tcp_line_tx, mut tcp_line_rx) = mpsc::channel::<String>(64);
-
     tokio::select! {
         // WS → TCP: read from WebSocket, connect to Copilot lazily, write to TCP
         _ = async {
@@ -132,15 +129,14 @@ pub async fn relay_lazy(
                                         let ws_tx_tcp = ws_tx.clone();
                                         let sm_tcp = sm_clone.clone();
                                         let sid_tcp = sid.clone();
-                                        let tcp_line_tx = tcp_line_tx.clone();
                                         tokio::spawn(async move {
-                                            tcp_reader_task(tcp_reader, ws_tx_tcp, tcp_line_tx, sm_tcp, &sid_tcp).await;
+                                            tcp_reader_task(tcp_reader, ws_tx_tcp, sm_tcp, &sid_tcp).await;
                                         });
                                     }
                                     Err(e) => {
                                         tracing::error!("Failed to connect to Copilot CLI: {}", e);
                                         let error_msg = format!(
-                                            r#"{{"jsonrpc":"2.0","error":{{"code":-32000,"message":"Bridge: failed to connect to Copilot CLI: {}"}}}}"#,
+                                            r#"{{"jsonrpc":"2.0","id":null,"error":{{"code":-32000,"message":"Bridge: failed to connect to Copilot CLI: {}"}}}}"#,
                                             e.to_string().replace('"', "'")
                                         );
                                         let _ = ws_tx.send(Message::Text(error_msg)).await;
@@ -180,30 +176,6 @@ pub async fn relay_lazy(
             }
         } => {
             tracing::info!("WS→TCP relay ended");
-        },
-
-        // TCP → WS: forward lines from the TCP reader task
-        _ = async {
-            while let Some(line) = tcp_line_rx.recv().await {
-                sm.record_activity(session_id).await;
-
-                if let Some(method) = extract_method(&line) {
-                    if method == "session/update" {
-                        sm.increment_messages(session_id).await;
-                    }
-                }
-
-                if let Some(copilot_sid) = extract_session_id_from_result(&line) {
-                    tracing::info!("Captured copilot session ID: {}", copilot_sid);
-                    sm.set_copilot_session_id(session_id, copilot_sid).await;
-                }
-
-                if ws_tx.send(Message::Text(line)).await.is_err() {
-                    break;
-                }
-            }
-        } => {
-            tracing::info!("TCP→WS relay ended");
         },
 
         // Periodic WebSocket ping and pong-timeout check
@@ -345,7 +317,7 @@ pub async fn relay_stdio(
                                     Err(e) => {
                                         tracing::error!("Failed to spawn Copilot CLI (stdio): {}", e);
                                         let error_msg = format!(
-                                            r#"{{"jsonrpc":"2.0","error":{{"code":-32000,"message":"Bridge: failed to spawn Copilot CLI: {}"}}}}"#,
+                                            r#"{{"jsonrpc":"2.0","id":null,"error":{{"code":-32000,"message":"Bridge: failed to spawn Copilot CLI: {}"}}}}"#,
                                             e.to_string().replace('"', "'")
                                         );
                                         let _ = ws_tx.send(Message::Text(error_msg)).await;
@@ -507,7 +479,6 @@ async fn stdio_reader_task(
 async fn tcp_reader_task(
     mut tcp_reader: NdjsonReader,
     ws_tx: mpsc::Sender<Message>,
-    _tcp_line_tx: mpsc::Sender<String>,
     sm: SessionManager,
     session_id: &str,
 ) {
@@ -553,7 +524,11 @@ fn truncate(s: &str, max: usize) -> &str {
     if s.len() <= max {
         s
     } else {
-        &s[..max]
+        let mut end = max;
+        while end > 0 && !s.is_char_boundary(end) {
+            end -= 1;
+        }
+        &s[..end]
     }
 }
 

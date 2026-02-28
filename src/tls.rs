@@ -41,7 +41,6 @@ pub fn load_tls_config(cert_path: &str, key_path: &str) -> Result<TlsAcceptor> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
     #[test]
     fn test_generate_self_signed_cert() {

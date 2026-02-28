@@ -42,7 +42,7 @@ impl CopilotProcess {
             .args(extra_args)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            .stderr(Stdio::null());
 
         let child = cmd.spawn().map_err(|e| {
             anyhow::anyhow!(
@@ -84,7 +84,7 @@ impl CopilotProcess {
             .args(extra_args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            .stderr(Stdio::null());
 
         let mut child = cmd.spawn().map_err(|e| {
             anyhow::anyhow!(

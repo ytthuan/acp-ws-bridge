@@ -53,18 +53,20 @@ impl NdjsonReader {
     /// Read the next NDJSON line. Returns `None` on EOF.
     /// Validates that the line is valid JSON but returns raw bytes.
     pub async fn read_line(&mut self) -> anyhow::Result<Option<String>> {
-        let mut line = String::new();
-        let n = self.reader.read_line(&mut line).await?;
-        if n == 0 {
-            return Ok(None);
+        loop {
+            let mut line = String::new();
+            let n = self.reader.read_line(&mut line).await?;
+            if n == 0 {
+                return Ok(None); // actual EOF
+            }
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue; // skip empty lines
+            }
+            // Validate JSON
+            serde_json::from_str::<serde_json::Value>(trimmed)?;
+            return Ok(Some(trimmed.to_string()));
         }
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            return Ok(None);
-        }
-        // Validate JSON
-        serde_json::from_str::<serde_json::Value>(trimmed)?;
-        Ok(Some(trimmed.to_string()))
     }
 }
 

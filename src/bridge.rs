@@ -186,7 +186,13 @@ async fn serve_with_tls(
     use hyper_util::server::conn::auto;
 
     loop {
-        let (tcp_stream, peer_addr) = listener.accept().await?;
+        let (tcp_stream, peer_addr) = match listener.accept().await {
+            Ok(conn) => conn,
+            Err(e) => {
+                tracing::error!("Accept error: {}", e);
+                continue;
+            }
+        };
         let tls_acceptor = tls_acceptor.clone();
         let app = app.clone();
 

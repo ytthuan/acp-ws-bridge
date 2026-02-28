@@ -6,11 +6,8 @@ use rusqlite::Connection;
 use serde::Serialize;
 
 /// Get the path to ~/.copilot/session-store.db
-fn session_store_path() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_default()
-        .join(".copilot")
-        .join("session-store.db")
+fn session_store_path() -> Option<PathBuf> {
+    dirs::home_dir().map(|h| h.join(".copilot").join("session-store.db"))
 }
 
 #[derive(Debug, Serialize)]
@@ -101,7 +98,11 @@ pub struct HistoryStats {
 
 /// List all sessions with turn counts, ordered by most recent first.
 pub fn list_sessions() -> anyhow::Result<Vec<HistorySession>> {
-    let conn = Connection::open(session_store_path())?;
+    let db_path = match session_store_path() {
+        Some(p) => p,
+        None => return Ok(vec![]),
+    };
+    let conn = Connection::open(db_path)?;
     let mut stmt = conn.prepare(
         "SELECT s.id, s.cwd, s.repository, s.branch, s.summary, s.created_at, s.updated_at,
                 COALESCE((SELECT COUNT(*) FROM turns t WHERE t.session_id = s.id), 0) as turn_count,
@@ -129,7 +130,11 @@ pub fn list_sessions() -> anyhow::Result<Vec<HistorySession>> {
 
 /// Get turns for a specific session, ordered by turn index.
 pub fn get_session_turns(session_id: &str) -> anyhow::Result<Vec<HistoryTurn>> {
-    let conn = Connection::open(session_store_path())?;
+    let db_path = match session_store_path() {
+        Some(p) => p,
+        None => return Ok(vec![]),
+    };
+    let conn = Connection::open(db_path)?;
     let mut stmt = conn.prepare(
         "SELECT turn_index, user_message, assistant_response, timestamp
          FROM turns WHERE session_id = ? ORDER BY turn_index",
@@ -149,7 +154,11 @@ pub fn get_session_turns(session_id: &str) -> anyhow::Result<Vec<HistoryTurn>> {
 
 /// Get aggregate statistics across all sessions.
 pub fn get_history_stats() -> anyhow::Result<HistoryStats> {
-    let conn = Connection::open(session_store_path())?;
+    let db_path = match session_store_path() {
+        Some(p) => p,
+        None => anyhow::bail!("Could not determine home directory"),
+    };
+    let conn = Connection::open(db_path)?;
 
     let total_sessions: i64 =
         conn.query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0))?;

@@ -94,7 +94,7 @@ async fn main() -> anyhow::Result<()> {
     info!("Idle session timeout: {}s", config.idle_timeout_secs);
 
     // Spawn REST API server on separate port (non-fatal if port in use)
-    let api_port = config.api_port.unwrap_or(config.ws_port + 1);
+    let api_port = config.api_port.unwrap_or(config.ws_port.saturating_add(1));
     let api_router = api::api_router(session_manager.clone());
     let api_addr = std::net::SocketAddr::from(([0, 0, 0, 0], api_port));
     info!("REST API: http://{}:{}", config.listen_addr, api_port);

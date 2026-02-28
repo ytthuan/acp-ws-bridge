@@ -137,7 +137,10 @@ pub fn api_router(session_manager: SessionManager) -> Router {
         .route("/api/history/sessions/:id", get(get_history_session))
         .route("/api/history/sessions/:id/turns", get(get_history_session_turns))
         .route("/api/history/stats", get(get_history_stats))
-        .layer(CorsLayer::permissive())
+        .layer(CorsLayer::new()
+            .allow_origin(tower_http::cors::Any)
+            .allow_methods([axum::http::Method::GET, axum::http::Method::DELETE, axum::http::Method::OPTIONS])
+            .allow_headers(tower_http::cors::Any))
         .with_state(state)
 }
 
