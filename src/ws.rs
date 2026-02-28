@@ -153,7 +153,7 @@ pub async fn relay_lazy(
                                 tracing::error!("Failed to write to TCP: {}", e);
                                 break;
                             }
-                            tracing::debug!("WS→TCP: {}", truncate(trimmed, 200));
+                            tracing::info!("WS→CLI: {}", trimmed);
                         }
                     }
                     Ok(Message::Close(_)) => {
@@ -346,7 +346,7 @@ pub async fn relay_stdio(
                                 tracing::error!("Failed to flush stdin: {}", e);
                                 break;
                             }
-                            tracing::debug!("WS→stdio: {}", truncate(trimmed, 200));
+                            tracing::info!("WS→CLI: {}", trimmed);
                         }
                     }
                     Ok(Message::Close(_)) => {
@@ -444,7 +444,7 @@ async fn stdio_reader_task(
                     continue;
                 }
 
-                tracing::debug!("stdio→WS: {}", truncate(trimmed, 200));
+                tracing::info!("CLI→WS: {}", trimmed);
                 sm.record_activity(session_id).await;
 
                 if let Some(method) = extract_method(trimmed) {
@@ -485,7 +485,7 @@ async fn tcp_reader_task(
     loop {
         match tcp_reader.read_line().await {
             Ok(Some(line)) => {
-                tracing::debug!("TCP→WS: {}", truncate(&line, 200));
+                tracing::info!("CLI→WS: {}", &line);
                 sm.record_activity(session_id).await;
 
                 if let Some(method) = extract_method(&line) {
