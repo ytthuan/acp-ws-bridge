@@ -13,12 +13,14 @@ use axum::response::IntoResponse;
 
 use crate::history;
 use crate::session::{SessionInfo, SessionManager, SessionStats};
+use crate::stats_cache::StatsCache;
 
 /// Shared state for API handlers.
 #[derive(Clone)]
 struct ApiState {
     session_manager: SessionManager,
     start_time: Arc<Instant>,
+    stats_cache: Arc<StatsCache>,
 }
 
 /// GET /health — Health check
@@ -118,18 +120,21 @@ async fn get_history_stats() -> impl IntoResponse {
 }
 
 /// GET /api/copilot/usage — aggregate Copilot CLI usage statistics
-async fn get_copilot_usage() -> impl IntoResponse {
-    match history::get_copilot_usage() {
-        Ok(stats) => Json(stats).into_response(),
+async fn get_copilot_usage(State(state): State<ApiState>) -> impl IntoResponse {
+    let cache = state.stats_cache.clone();
+    match tokio::task::spawn_blocking(move || history::get_copilot_usage(&cache)).await {
+        Ok(Ok(stats)) => Json(stats).into_response(),
+        Ok(Err(e)) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
 
 /// Build the axum Router for the REST API.
-pub fn api_router(session_manager: SessionManager) -> Router {
+pub fn api_router(session_manager: SessionManager, stats_cache: Arc<StatsCache>) -> Router {
     let state = ApiState {
         session_manager,
         start_time: Arc::new(Instant::now()),
+        stats_cache,
     };
 
     Router::new()
@@ -162,7 +167,7 @@ mod tests {
     use tower::ServiceExt;
 
     fn test_app() -> Router {
-        api_router(SessionManager::new())
+        api_router(SessionManager::new(), Arc::new(StatsCache::new()))
     }
 
     async fn body_json(body: Body) -> serde_json::Value {
@@ -247,7 +252,7 @@ mod tests {
         sm.create_session().await;
         sm.create_session().await;
 
-        let app = api_router(sm);
+        let app = api_router(sm, std::sync::Arc::new(crate::stats_cache::StatsCache::new()));
         let req = Request::builder()
             .uri("/api/sessions")
             .body(Body::empty())
@@ -264,7 +269,7 @@ mod tests {
         let sm = SessionManager::new();
         let info = sm.create_session().await;
 
-        let app = api_router(sm);
+        let app = api_router(sm, std::sync::Arc::new(crate::stats_cache::StatsCache::new()));
         let req = Request::builder()
             .uri(format!("/api/sessions/{}", info.id))
             .body(Body::empty())
@@ -281,7 +286,7 @@ mod tests {
         let sm = SessionManager::new();
         let info = sm.create_session().await;
 
-        let app = api_router(sm);
+        let app = api_router(sm, std::sync::Arc::new(crate::stats_cache::StatsCache::new()));
         let req = Request::builder()
             .method("DELETE")
             .uri(format!("/api/sessions/{}", info.id))
@@ -302,7 +307,7 @@ mod tests {
         sm.increment_messages(&s1.id).await;
         sm.increment_messages(&s1.id).await;
 
-        let app = api_router(sm);
+        let app = api_router(sm, std::sync::Arc::new(crate::stats_cache::StatsCache::new()));
         let req = Request::builder()
             .uri("/api/stats")
             .body(Body::empty())
@@ -333,7 +338,7 @@ mod tests {
     async fn test_get_session_commands_empty() {
         let sm = SessionManager::new();
         let info = sm.create_session().await;
-        let app = api_router(sm);
+        let app = api_router(sm, std::sync::Arc::new(crate::stats_cache::StatsCache::new()));
         let req = Request::builder()
             .uri(format!("/api/sessions/{}/commands", info.id))
             .body(Body::empty())
@@ -351,7 +356,7 @@ mod tests {
         let cmds = serde_json::json!([{"name": "explain"}, {"name": "fix"}]);
         sm.set_available_commands(&info.id, cmds.clone()).await;
 
-        let app = api_router(sm);
+        let app = api_router(sm, std::sync::Arc::new(crate::stats_cache::StatsCache::new()));
         let req = Request::builder()
             .uri(format!("/api/sessions/{}/commands", info.id))
             .body(Body::empty())

@@ -5,10 +5,12 @@ mod config;
 mod copilot;
 mod history;
 mod session;
+mod stats_cache;
 mod tls;
 mod ws;
 
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 use bridge::Bridge;
@@ -92,6 +94,25 @@ async fn main() -> anyhow::Result<()> {
 
     let session_manager = SessionManager::new();
 
+    // Build stats cache and start background refresh task.
+    let stats_cache = Arc::new(stats_cache::StatsCache::new());
+    let cache_for_task = stats_cache.clone();
+    tokio::spawn(async move {
+        // Initial refresh on a blocking thread so it doesn't stall the async runtime.
+        tokio::task::spawn_blocking({
+            let c = cache_for_task.clone();
+            move || c.refresh()
+        })
+        .await
+        .ok();
+
+        loop {
+            tokio::time::sleep(tokio::time::Duration::from_secs(300)).await;
+            let c = cache_for_task.clone();
+            tokio::task::spawn_blocking(move || c.refresh()).await.ok();
+        }
+    });
+
     // Spawn idle session checker
     let idle_timeout = Duration::from_secs(config.idle_timeout_secs);
     let _idle_checker = spawn_idle_checker(session_manager.clone(), idle_timeout);
@@ -99,7 +120,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Spawn REST API server on separate port (non-fatal if port in use)
     let api_port = config.api_port.unwrap_or(config.ws_port.saturating_add(1));
-    let api_router = api::api_router(session_manager.clone());
+    let api_router = api::api_router(session_manager.clone(), stats_cache);
     let api_addr = std::net::SocketAddr::from(([0, 0, 0, 0], api_port));
     info!("REST API: http://{}:{}", config.listen_addr, api_port);
 
