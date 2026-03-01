@@ -1,5 +1,6 @@
 //! Read-only access to Copilot CLI session history from ~/.copilot/session-store.db.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use rusqlite::Connection;
@@ -353,6 +354,178 @@ fn query_vec<T>(
                 .collect::<Result<Vec<_>, _>>()
         })
         .unwrap_or_default()
+}
+
+// ---- Copilot usage stats (events.jsonl + session-store.db) ----
+
+#[derive(Debug, Serialize)]
+pub struct ModelUsage {
+    pub model: String,
+    pub count: u64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MonthUsage {
+    pub month: String,
+    pub sessions: i64,
+    pub turns: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ModelChange {
+    pub model: String,
+    pub timestamp: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CopilotUsageStats {
+    #[serde(rename = "totalSessions")]
+    pub total_sessions: i64,
+    #[serde(rename = "totalTurns")]
+    pub total_turns: i64,
+    #[serde(rename = "totalFilesEdited")]
+    pub total_files_edited: i64,
+    #[serde(rename = "modelUsage")]
+    pub model_usage: Vec<ModelUsage>,
+    #[serde(rename = "sessionsByMonth")]
+    pub sessions_by_month: Vec<MonthUsage>,
+    #[serde(rename = "recentModelChanges")]
+    pub recent_model_changes: Vec<ModelChange>,
+    #[serde(rename = "totalToolExecutions")]
+    pub total_tool_executions: u64,
+    #[serde(rename = "eventTypeCounts")]
+    pub event_type_counts: HashMap<String, u64>,
+}
+
+/// Aggregate usage statistics from session-store.db and session-state/*/events.jsonl.
+pub fn get_copilot_usage() -> anyhow::Result<CopilotUsageStats> {
+    let home = dirs::home_dir().unwrap_or_default();
+    let copilot_dir = home.join(".copilot");
+
+    let mut total_sessions: i64 = 0;
+    let mut total_turns: i64 = 0;
+    let mut total_files_edited: i64 = 0;
+    let mut sessions_by_month: Vec<MonthUsage> = Vec::new();
+
+    // Read aggregate counts from session-store.db (read-only).
+    let store_db = copilot_dir.join("session-store.db");
+    if store_db.exists() {
+        let conn = Connection::open_with_flags(
+            &store_db,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+                | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+
+        total_sessions = conn
+            .query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0))
+            .unwrap_or(0);
+        total_turns = conn
+            .query_row("SELECT COUNT(*) FROM turns", [], |r| r.get(0))
+            .unwrap_or(0);
+        total_files_edited = conn
+            .query_row("SELECT COUNT(*) FROM session_files", [], |r| r.get(0))
+            .unwrap_or(0);
+
+        sessions_by_month = query_vec(
+            &conn,
+            "SELECT substr(s.created_at, 1, 7) as month, \
+                    COUNT(DISTINCT s.id) as sessions, \
+                    COUNT(t.turn_index) as turns \
+             FROM sessions s \
+             LEFT JOIN turns t ON t.session_id = s.id \
+             WHERE s.created_at IS NOT NULL \
+             GROUP BY month ORDER BY month",
+            |row| {
+                Ok(MonthUsage {
+                    month: row.get(0)?,
+                    sessions: row.get(1)?,
+                    turns: row.get(2)?,
+                })
+            },
+        );
+    }
+
+    // Scan events.jsonl files for model usage, event type counts, and model changes.
+    let mut model_counts: HashMap<String, u64> = HashMap::new();
+    let mut event_type_counts: HashMap<String, u64> = HashMap::new();
+    let mut total_tool_executions: u64 = 0;
+    let mut model_changes: Vec<ModelChange> = Vec::new();
+
+    let session_state_dir = copilot_dir.join("session-state");
+    if session_state_dir.exists() {
+        if let Ok(entries) = std::fs::read_dir(&session_state_dir) {
+            for entry in entries.flatten() {
+                let events_file = entry.path().join("events.jsonl");
+                if !events_file.exists() {
+                    continue;
+                }
+                if let Ok(content) = std::fs::read_to_string(&events_file) {
+                    let mut last_model: Option<String> = None;
+                    for line in content.lines() {
+                        if line.trim().is_empty() {
+                            continue;
+                        }
+                        if let Ok(obj) = serde_json::from_str::<serde_json::Value>(line) {
+                            let event_type = obj
+                                .get("type")
+                                .and_then(|t| t.as_str())
+                                .unwrap_or("unknown")
+                                .to_string();
+                            *event_type_counts.entry(event_type.clone()).or_insert(0) += 1;
+
+                            if event_type == "tool.execution_complete" {
+                                total_tool_executions += 1;
+                                if let Some(model) = obj
+                                    .pointer("/data/model")
+                                    .and_then(|m| m.as_str())
+                                {
+                                    *model_counts.entry(model.to_string()).or_insert(0) += 1;
+                                    // Record a model change when the model differs from last seen.
+                                    if last_model.as_deref() != Some(model) {
+                                        let ts = obj
+                                            .pointer("/data/timestamp")
+                                            .or_else(|| obj.get("timestamp"))
+                                            .and_then(|t| t.as_str())
+                                            .unwrap_or("")
+                                            .to_string();
+                                        if !ts.is_empty() {
+                                            model_changes.push(ModelChange {
+                                                model: model.to_string(),
+                                                timestamp: ts,
+                                            });
+                                        }
+                                        last_model = Some(model.to_string());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Sort model usage by count descending.
+    let mut model_usage: Vec<ModelUsage> = model_counts
+        .into_iter()
+        .map(|(model, count)| ModelUsage { model, count })
+        .collect();
+    model_usage.sort_by(|a, b| b.count.cmp(&a.count));
+
+    // Keep only the 20 most-recent model changes (sort by timestamp desc).
+    model_changes.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    model_changes.truncate(20);
+
+    Ok(CopilotUsageStats {
+        total_sessions,
+        total_turns,
+        total_files_edited,
+        model_usage,
+        sessions_by_month,
+        recent_model_changes: model_changes,
+        total_tool_executions,
+        event_type_counts,
+    })
 }
 
 /// Format minutes as a human-readable duration string.

@@ -117,6 +117,14 @@ async fn get_history_stats() -> impl IntoResponse {
     }
 }
 
+/// GET /api/copilot/usage — aggregate Copilot CLI usage statistics
+async fn get_copilot_usage() -> impl IntoResponse {
+    match history::get_copilot_usage() {
+        Ok(stats) => Json(stats).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
 /// Build the axum Router for the REST API.
 pub fn api_router(session_manager: SessionManager) -> Router {
     let state = ApiState {
@@ -137,6 +145,7 @@ pub fn api_router(session_manager: SessionManager) -> Router {
         .route("/api/history/sessions/:id", get(get_history_session))
         .route("/api/history/sessions/:id/turns", get(get_history_session_turns))
         .route("/api/history/stats", get(get_history_stats))
+        .route("/api/copilot/usage", get(get_copilot_usage))
         .layer(CorsLayer::new()
             .allow_origin(tower_http::cors::Any)
             .allow_methods([axum::http::Method::GET, axum::http::Method::DELETE, axum::http::Method::OPTIONS])
