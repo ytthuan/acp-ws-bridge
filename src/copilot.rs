@@ -39,6 +39,7 @@ impl CopilotProcess {
         cmd.arg("--acp")
             .arg("--port")
             .arg(port.to_string())
+            .arg("--resume") // Enable loading sessions from CLI history
             .args(extra_args)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -81,6 +82,7 @@ impl CopilotProcess {
         let mut cmd = Command::new(copilot_path);
         cmd.arg("--acp")
             .arg("--stdio")
+            .arg("--resume") // Enable loading sessions from CLI history
             .args(extra_args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
