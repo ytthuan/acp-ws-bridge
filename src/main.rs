@@ -99,17 +99,21 @@ async fn main() -> anyhow::Result<()> {
     let cache_for_task = stats_cache.clone();
     tokio::spawn(async move {
         // Initial refresh on a blocking thread so it doesn't stall the async runtime.
-        tokio::task::spawn_blocking({
+        if let Err(e) = tokio::task::spawn_blocking({
             let c = cache_for_task.clone();
             move || c.refresh()
         })
         .await
-        .ok();
+        {
+            tracing::error!("Stats cache refresh failed: {}", e);
+        }
 
         loop {
             tokio::time::sleep(tokio::time::Duration::from_secs(300)).await;
             let c = cache_for_task.clone();
-            tokio::task::spawn_blocking(move || c.refresh()).await.ok();
+            if let Err(e) = tokio::task::spawn_blocking(move || c.refresh()).await {
+                tracing::error!("Stats cache refresh failed: {}", e);
+            }
         }
     });
 

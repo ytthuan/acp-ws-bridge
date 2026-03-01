@@ -14,7 +14,9 @@ pub struct StatsCache {
     copilot_dir: PathBuf,
 }
 
-// StatsCache only holds PathBuf values — safe to share across threads.
+// SAFETY: StatsCache only holds PathBuf values which are Send + Sync.
+// The struct never stores database connections — those are created
+// per-method-call and dropped before returning.
 unsafe impl Send for StatsCache {}
 unsafe impl Sync for StatsCache {}
 
@@ -273,7 +275,9 @@ impl StatsCache {
                 rusqlite::params![file_key, file_size],
             ).ok();
 
-            conn.execute("COMMIT", []).ok();
+            if let Err(e) = conn.execute("COMMIT", []) {
+                tracing::error!("Stats cache COMMIT failed: {}", e);
+            }
         }
 
         let now_secs = SystemTime::now()
