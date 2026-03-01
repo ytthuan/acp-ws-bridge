@@ -94,8 +94,8 @@ impl CopilotProcess {
             )
         })?;
 
-        let stdin = child.stdin.take().expect("stdin must be piped");
-        let stdout = child.stdout.take().expect("stdout must be piped");
+        let stdin = child.stdin.take().ok_or_else(|| anyhow::anyhow!("Failed to capture stdin pipe from Copilot CLI process"))?;
+        let stdout = child.stdout.take().ok_or_else(|| anyhow::anyhow!("Failed to capture stdout pipe from Copilot CLI process"))?;
 
         tracing::info!("Copilot CLI spawned in stdio mode (PID: {:?})", child.id());
 
