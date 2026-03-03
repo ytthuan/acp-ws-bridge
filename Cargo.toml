@@ -3,6 +3,12 @@ name = "acp-ws-bridge"
 version = "0.1.0"
 edition = "2021"
 description = "WebSocket bridge between GitHub Copilot CLI (ACP) and remote clients"
+license = "MIT"
+repository = "https://github.com/ytthuan/acp-ws-bridge"
+homepage = "https://github.com/ytthuan/acp-ws-bridge"
+readme = "README.md"
+keywords = ["acp", "websocket", "copilot", "bridge", "json-rpc"]
+categories = ["command-line-utilities", "network-programming", "web-programming::websocket"]
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
