@@ -24,6 +24,13 @@ pub fn generate_self_signed_cert(
     std::fs::write(cert_path, certified_key.cert.pem())?;
     std::fs::write(key_path, certified_key.key_pair.serialize_pem())?;
 
+    // Restrict private key file permissions on Unix
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(key_path, std::fs::Permissions::from_mode(0o600))?;
+    }
+
     Ok(())
 }
 

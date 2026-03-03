@@ -134,14 +134,37 @@ async fn main() -> anyhow::Result<()> {
     let api_port = config.api_port.unwrap_or(config.ws_port.saturating_add(1));
     let api_router = api::api_router(session_manager.clone(), stats_cache);
     let api_addr = std::net::SocketAddr::from(([0, 0, 0, 0], api_port));
-    info!("REST API: http://{}:{}", config.listen_addr, api_port);
+
+    // Load TLS config once — shared by both WebSocket and REST API servers
+    let tls_acceptor = match (&config.tls_cert, &config.tls_key) {
+        (Some(cert), Some(key)) => Some(tls::load_tls_config(cert, key)?),
+        _ => None,
+    };
+
+    let api_tls = tls_acceptor.clone();
+    if api_tls.is_some() {
+        info!("REST API: https://{}:{}", config.listen_addr, api_port);
+    } else {
+        info!("REST API: http://{}:{}", config.listen_addr, api_port);
+    }
 
     tokio::spawn(async move {
         match tokio::net::TcpListener::bind(api_addr).await {
             Ok(listener) => {
                 info!("REST API listening on port {}", api_port);
-                if let Err(e) = axum::serve(listener, api_router).await {
-                    tracing::error!("REST API server error: {}", e);
+                match api_tls {
+                    Some(acceptor) => {
+                        if let Err(e) = bridge::serve_with_tls(listener, api_router, acceptor).await
+                        {
+                            tracing::error!("REST API (HTTPS) server error: {}", e);
+                        }
+                    }
+                    None => {
+                        if let Err(e) = axum::serve(listener, api_router.into_make_service()).await
+                        {
+                            tracing::error!("REST API server error: {}", e);
+                        }
+                    }
                 }
             }
             Err(e) => {
@@ -154,7 +177,7 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    let bridge = Bridge::new(config, session_manager);
+    let bridge = Bridge::new(config, session_manager, tls_acceptor);
 
     bridge.run().await
 }

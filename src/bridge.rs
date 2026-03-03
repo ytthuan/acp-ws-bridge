@@ -14,13 +14,13 @@ use axum::Router;
 
 use crate::config::Config;
 use crate::session::{SessionManager, SessionStatus};
-use crate::tls;
 use crate::ws;
 
 /// Core bridge that accepts WebSocket connections and relays to Copilot CLI.
 pub struct Bridge {
     config: Config,
     session_manager: SessionManager,
+    tls_acceptor: Option<tokio_native_tls::TlsAcceptor>,
 }
 
 /// Shared state for WebSocket upgrade handlers.
@@ -35,10 +35,15 @@ struct WsState {
 }
 
 impl Bridge {
-    pub fn new(config: Config, session_manager: SessionManager) -> Self {
+    pub fn new(
+        config: Config,
+        session_manager: SessionManager,
+        tls_acceptor: Option<tokio_native_tls::TlsAcceptor>,
+    ) -> Self {
         Self {
             config,
             session_manager,
+            tls_acceptor,
         }
     }
 
@@ -63,17 +68,16 @@ impl Bridge {
 
         let listener = tokio::net::TcpListener::bind(&addr).await?;
 
-        match (&self.config.tls_cert, &self.config.tls_key) {
-            (Some(cert), Some(key)) => {
-                let tls_acceptor = tls::load_tls_config(cert, key)?;
-                tracing::info!("TLS enabled (cert: {}, key: {})", cert, key);
+        match &self.tls_acceptor {
+            Some(acceptor) => {
+                tracing::info!("TLS enabled for WebSocket server");
                 tracing::info!("WebSocket listening on wss://{}", addr);
-                serve_with_tls(listener, app, tls_acceptor).await
+                serve_with_tls(listener, app, acceptor.clone()).await
             }
-            (Some(_), None) | (None, Some(_)) => {
-                anyhow::bail!("Both --tls-cert and --tls-key must be provided for TLS");
-            }
-            _ => {
+            None => {
+                if self.config.tls_cert.is_some() || self.config.tls_key.is_some() {
+                    anyhow::bail!("Both --tls-cert and --tls-key must be provided for TLS");
+                }
                 tracing::info!("WebSocket listening on ws://{}", addr);
                 axum::serve(
                     listener,
@@ -144,7 +148,7 @@ async fn handle_ws_connection(
 /// Hyper service adapter that wraps the axum Router for TLS connections,
 /// injecting ConnectInfo and converting between hyper and axum body types.
 #[derive(Clone)]
-struct TlsService {
+pub(crate) struct TlsService {
     router: Router,
     peer_addr: SocketAddr,
 }
@@ -168,7 +172,7 @@ impl hyper::service::Service<hyper::Request<hyper::body::Incoming>> for TlsServi
 }
 
 /// Serve the axum app over TLS using hyper-util for each connection.
-async fn serve_with_tls(
+pub(crate) async fn serve_with_tls(
     listener: tokio::net::TcpListener,
     app: Router,
     tls_acceptor: tokio_native_tls::TlsAcceptor,

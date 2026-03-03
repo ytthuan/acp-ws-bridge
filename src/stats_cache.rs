@@ -14,12 +14,6 @@ pub struct StatsCache {
     copilot_dir: PathBuf,
 }
 
-// SAFETY: StatsCache only holds PathBuf values which are Send + Sync.
-// The struct never stores database connections — those are created
-// per-method-call and dropped before returning.
-unsafe impl Send for StatsCache {}
-unsafe impl Sync for StatsCache {}
-
 impl StatsCache {
     pub fn new() -> Self {
         let home = dirs::home_dir().unwrap_or_default();

@@ -26,8 +26,11 @@ cargo build --release
 # Run (starts Copilot CLI via stdio, listens on WebSocket port 8765)
 cargo run -- --ws-port 8765
 
-# With TLS
+# With TLS (enables wss:// for WebSocket and HTTPS for REST API)
 cargo run -- --ws-port 8765 --tls-cert cert.pem --tls-key key.pem
+
+# Generate a self-signed certificate
+cargo run -- --generate-cert --cert-hostnames "localhost,127.0.0.1"
 
 # With custom API port
 cargo run -- --ws-port 8765 --api-port 8766
@@ -53,10 +56,13 @@ Prebuilt release binaries are published on GitHub Releases for:
 |------|---------|-------------|
 | `--ws-port` | 8765 | WebSocket listen port |
 | `--api-port` | 8766 | REST API listen port |
-| `--tls-cert` | — | TLS certificate path |
+| `--tls-cert` | — | TLS certificate path (enables wss:// and HTTPS) |
 | `--tls-key` | — | TLS private key path |
-| `--resume` | — | Resume a previous session |
+| `--generate-cert` | — | Generate self-signed certificate and exit |
+| `--cert-hostnames` | `localhost,127.0.0.1` | Hostnames for self-signed certificate |
 | `--copilot-path` | `copilot` | Path to Copilot CLI |
+
+When `--tls-cert` and `--tls-key` are provided, both the WebSocket server (wss://) and the REST API (HTTPS) use the same TLS configuration.
 
 ## Release Process
 
