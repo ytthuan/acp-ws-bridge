@@ -12,8 +12,8 @@ use crate::acp::{JsonRpcMessage, NdjsonReader, NdjsonWriter};
 use crate::copilot::CopilotProcess;
 use crate::session::SessionManager;
 
-const PING_INTERVAL: Duration = Duration::from_secs(30);
-const PONG_TIMEOUT: Duration = Duration::from_secs(60);
+const PING_INTERVAL: Duration = Duration::from_secs(120);
+const PONG_TIMEOUT: Duration = Duration::from_secs(1800);
 
 /// Extract the ACP method name from a JSON string, if present.
 fn extract_method(json: &str) -> Option<String> {
