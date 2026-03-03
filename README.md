@@ -64,6 +64,54 @@ Prebuilt release binaries are published on GitHub Releases for:
 
 When `--tls-cert` and `--tls-key` are provided, both the WebSocket server (wss://) and the REST API (HTTPS) use the same TLS configuration.
 
+## Generate TLS Cert/Key by Script
+
+You can use either the built-in generator (`--generate-cert`) or platform scripts below.
+
+### Cross-platform (recommended)
+
+```bash
+cargo run -- --generate-cert --tls-cert cert.pem --tls-key key.pem --cert-hostnames "localhost,127.0.0.1"
+```
+
+### macOS / Linux (OpenSSL)
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+CERT_FILE="${1:-cert.pem}"
+KEY_FILE="${2:-key.pem}"
+SUBJ="${3:-/CN=localhost}"
+
+openssl req -x509 -newkey rsa:2048 -sha256 -days 365 -nodes \
+  -keyout "${KEY_FILE}" \
+  -out "${CERT_FILE}" \
+  -subj "${SUBJ}" \
+  -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+
+chmod 600 "${KEY_FILE}"
+echo "Generated ${CERT_FILE} and ${KEY_FILE}"
+```
+
+### Windows (PowerShell + OpenSSL)
+
+```powershell
+param(
+  [string]$CertFile = "cert.pem",
+  [string]$KeyFile = "key.pem",
+  [string]$Subject = "/CN=localhost"
+)
+
+openssl req -x509 -newkey rsa:2048 -sha256 -days 365 -nodes `
+  -keyout $KeyFile `
+  -out $CertFile `
+  -subj $Subject `
+  -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+
+Write-Host "Generated $CertFile and $KeyFile"
+```
+
 ## Release Process
 
 Releases are tag-driven and deterministic:
