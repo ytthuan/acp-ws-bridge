@@ -69,10 +69,7 @@ async fn get_session_commands(
 }
 
 /// DELETE /api/sessions/:id — Delete a session
-async fn delete_session(
-    State(state): State<ApiState>,
-    Path(id): Path<String>,
-) -> StatusCode {
+async fn delete_session(State(state): State<ApiState>, Path(id): Path<String>) -> StatusCode {
     if state.session_manager.delete_session(&id).await {
         StatusCode::NO_CONTENT
     } else {
@@ -140,21 +137,27 @@ pub fn api_router(session_manager: SessionManager, stats_cache: Arc<StatsCache>)
     Router::new()
         .route("/health", get(health))
         .route("/api/sessions", get(list_sessions))
-        .route(
-            "/api/sessions/:id",
-            get(get_session).delete(delete_session),
-        )
+        .route("/api/sessions/:id", get(get_session).delete(delete_session))
         .route("/api/sessions/:id/commands", get(get_session_commands))
         .route("/api/stats", get(get_stats))
         .route("/api/history/sessions", get(list_history_sessions))
         .route("/api/history/sessions/:id", get(get_history_session))
-        .route("/api/history/sessions/:id/turns", get(get_history_session_turns))
+        .route(
+            "/api/history/sessions/:id/turns",
+            get(get_history_session_turns),
+        )
         .route("/api/history/stats", get(get_history_stats))
         .route("/api/copilot/usage", get(get_copilot_usage))
-        .layer(CorsLayer::new()
-            .allow_origin(tower_http::cors::Any)
-            .allow_methods([axum::http::Method::GET, axum::http::Method::DELETE, axum::http::Method::OPTIONS])
-            .allow_headers(tower_http::cors::Any))
+        .layer(
+            CorsLayer::new()
+                .allow_origin(tower_http::cors::Any)
+                .allow_methods([
+                    axum::http::Method::GET,
+                    axum::http::Method::DELETE,
+                    axum::http::Method::OPTIONS,
+                ])
+                .allow_headers(tower_http::cors::Any),
+        )
         .with_state(state)
 }
 
@@ -252,7 +255,10 @@ mod tests {
         sm.create_session().await;
         sm.create_session().await;
 
-        let app = api_router(sm, std::sync::Arc::new(crate::stats_cache::StatsCache::new()));
+        let app = api_router(
+            sm,
+            std::sync::Arc::new(crate::stats_cache::StatsCache::new()),
+        );
         let req = Request::builder()
             .uri("/api/sessions")
             .body(Body::empty())
@@ -269,7 +275,10 @@ mod tests {
         let sm = SessionManager::new();
         let info = sm.create_session().await;
 
-        let app = api_router(sm, std::sync::Arc::new(crate::stats_cache::StatsCache::new()));
+        let app = api_router(
+            sm,
+            std::sync::Arc::new(crate::stats_cache::StatsCache::new()),
+        );
         let req = Request::builder()
             .uri(format!("/api/sessions/{}", info.id))
             .body(Body::empty())
@@ -286,7 +295,10 @@ mod tests {
         let sm = SessionManager::new();
         let info = sm.create_session().await;
 
-        let app = api_router(sm, std::sync::Arc::new(crate::stats_cache::StatsCache::new()));
+        let app = api_router(
+            sm,
+            std::sync::Arc::new(crate::stats_cache::StatsCache::new()),
+        );
         let req = Request::builder()
             .method("DELETE")
             .uri(format!("/api/sessions/{}", info.id))
@@ -301,13 +313,18 @@ mod tests {
         let sm = SessionManager::new();
         let s1 = sm.create_session().await;
         let s2 = sm.create_session().await;
-        sm.update_status(&s1.id, crate::session::SessionStatus::Active).await;
-        sm.update_status(&s2.id, crate::session::SessionStatus::Idle).await;
+        sm.update_status(&s1.id, crate::session::SessionStatus::Active)
+            .await;
+        sm.update_status(&s2.id, crate::session::SessionStatus::Idle)
+            .await;
         sm.increment_prompts(&s1.id).await;
         sm.increment_messages(&s1.id).await;
         sm.increment_messages(&s1.id).await;
 
-        let app = api_router(sm, std::sync::Arc::new(crate::stats_cache::StatsCache::new()));
+        let app = api_router(
+            sm,
+            std::sync::Arc::new(crate::stats_cache::StatsCache::new()),
+        );
         let req = Request::builder()
             .uri("/api/stats")
             .body(Body::empty())
@@ -338,7 +355,10 @@ mod tests {
     async fn test_get_session_commands_empty() {
         let sm = SessionManager::new();
         let info = sm.create_session().await;
-        let app = api_router(sm, std::sync::Arc::new(crate::stats_cache::StatsCache::new()));
+        let app = api_router(
+            sm,
+            std::sync::Arc::new(crate::stats_cache::StatsCache::new()),
+        );
         let req = Request::builder()
             .uri(format!("/api/sessions/{}/commands", info.id))
             .body(Body::empty())
@@ -356,7 +376,10 @@ mod tests {
         let cmds = serde_json::json!([{"name": "explain"}, {"name": "fix"}]);
         sm.set_available_commands(&info.id, cmds.clone()).await;
 
-        let app = api_router(sm, std::sync::Arc::new(crate::stats_cache::StatsCache::new()));
+        let app = api_router(
+            sm,
+            std::sync::Arc::new(crate::stats_cache::StatsCache::new()),
+        );
         let req = Request::builder()
             .uri(format!("/api/sessions/{}/commands", info.id))
             .body(Body::empty())

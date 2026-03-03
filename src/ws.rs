@@ -153,7 +153,7 @@ pub async fn relay_lazy(
                                 tracing::error!("Failed to write to TCP: {}", e);
                                 break;
                             }
-                            tracing::info!("WS→CLI: {}", trimmed);
+                            tracing::info!("WS→CLI: {}", truncate(trimmed, 300));
                         }
                     }
                     Ok(Message::Close(_)) => {
@@ -184,7 +184,11 @@ pub async fn relay_lazy(
                 ping_interval.tick().await;
                 let elapsed = Instant::now().duration_since(*last_pong.lock().await);
                 if elapsed > PONG_TIMEOUT {
-                    tracing::warn!("No pong received in {:.0}s — connection presumed dead", elapsed.as_secs_f64());
+                    tracing::warn!("No pong received in {:.0}s — closing dead connection", elapsed.as_secs_f64());
+                    let _ = ws_tx_ping.send(Message::Close(Some(CloseFrame {
+                        code: 1001,
+                        reason: "pong timeout".into(),
+                    }))).await;
                     break;
                 }
                 if ws_tx_ping.send(Message::Ping(vec![])).await.is_err() {
@@ -263,8 +267,9 @@ pub async fn relay_stdio(
     let mut ping_interval = tokio::time::interval(PING_INTERVAL);
 
     // State for the lazy stdio child process
-    let stdio_writer: Arc<tokio::sync::Mutex<Option<tokio::io::BufWriter<tokio::process::ChildStdin>>>> =
-        Arc::new(tokio::sync::Mutex::new(None));
+    let stdio_writer: Arc<
+        tokio::sync::Mutex<Option<tokio::io::BufWriter<tokio::process::ChildStdin>>>,
+    > = Arc::new(tokio::sync::Mutex::new(None));
     let stdio_writer_clone = stdio_writer.clone();
 
     // Hold the child process so it lives as long as the connection
@@ -346,7 +351,7 @@ pub async fn relay_stdio(
                                 tracing::error!("Failed to flush stdin: {}", e);
                                 break;
                             }
-                            tracing::info!("WS→CLI: {}", trimmed);
+                            tracing::info!("WS→CLI: {}", truncate(trimmed, 300));
                         }
                     }
                     Ok(Message::Close(_)) => {
@@ -377,7 +382,11 @@ pub async fn relay_stdio(
                 ping_interval.tick().await;
                 let elapsed = Instant::now().duration_since(*last_pong.lock().await);
                 if elapsed > PONG_TIMEOUT {
-                    tracing::warn!("No pong received in {:.0}s — connection presumed dead", elapsed.as_secs_f64());
+                    tracing::warn!("No pong received in {:.0}s — closing dead connection", elapsed.as_secs_f64());
+                    let _ = ws_tx_ping.send(Message::Close(Some(CloseFrame {
+                        code: 1001,
+                        reason: "pong timeout".into(),
+                    }))).await;
                     break;
                 }
                 if ws_tx_ping.send(Message::Ping(vec![])).await.is_err() {
@@ -440,11 +449,14 @@ async fn stdio_reader_task(
                 }
                 // Validate JSON
                 if serde_json::from_str::<serde_json::Value>(trimmed).is_err() {
-                    tracing::warn!("stdio→WS: non-JSON line from Copilot CLI, skipping: {}", truncate(trimmed, 200));
+                    tracing::warn!(
+                        "stdio→WS: non-JSON line from Copilot CLI, skipping: {}",
+                        truncate(trimmed, 200)
+                    );
                     continue;
                 }
 
-                tracing::info!("CLI→WS: {}", trimmed);
+                tracing::info!("CLI→WS: {}", truncate(trimmed, 300));
                 sm.record_activity(session_id).await;
 
                 if let Some(method) = extract_method(trimmed) {
@@ -463,7 +475,11 @@ async fn stdio_reader_task(
                     sm.set_available_commands(session_id, commands).await;
                 }
 
-                if ws_tx.send(Message::Text(trimmed.to_string())).await.is_err() {
+                if ws_tx
+                    .send(Message::Text(trimmed.to_string()))
+                    .await
+                    .is_err()
+                {
                     break;
                 }
             }
@@ -485,7 +501,7 @@ async fn tcp_reader_task(
     loop {
         match tcp_reader.read_line().await {
             Ok(Some(line)) => {
-                tracing::info!("CLI→WS: {}", &line);
+                tracing::info!("CLI→WS: {}", truncate(&line, 300));
                 sm.record_activity(session_id).await;
 
                 if let Some(method) = extract_method(&line) {
@@ -616,7 +632,7 @@ mod tests {
     fn test_extract_available_commands_flat_format() {
         let json = r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","type":"available_commands_update","available_commands":["cmd1","cmd2"]}}"#;
         let cmds = extract_available_commands(json).unwrap();
-        assert_eq!(cmds, serde_json::json!(["cmd1","cmd2"]));
+        assert_eq!(cmds, serde_json::json!(["cmd1", "cmd2"]));
     }
 
     #[test]

@@ -161,10 +161,8 @@ pub fn get_history_stats() -> anyhow::Result<HistoryStats> {
     };
     let conn = Connection::open(db_path)?;
 
-    let total_sessions: i64 =
-        conn.query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0))?;
-    let total_turns: i64 =
-        conn.query_row("SELECT COUNT(*) FROM turns", [], |r| r.get(0))?;
+    let total_sessions: i64 = conn.query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0))?;
+    let total_turns: i64 = conn.query_row("SELECT COUNT(*) FROM turns", [], |r| r.get(0))?;
     let total_repositories: i64 = conn.query_row(
         "SELECT COUNT(DISTINCT repository) FROM sessions \
          WHERE repository IS NOT NULL AND repository != ''",
@@ -228,20 +226,35 @@ pub fn get_history_stats() -> anyhow::Result<HistoryStats> {
         "SELECT date(created_at) as d, COUNT(*) FROM sessions \
          WHERE created_at >= date('now', '-30 days') AND created_at IS NOT NULL \
          GROUP BY d ORDER BY d",
-        |row| Ok(DateCount { date: row.get(0)?, count: row.get(1)? }),
+        |row| {
+            Ok(DateCount {
+                date: row.get(0)?,
+                count: row.get(1)?,
+            })
+        },
     );
     let sessions_by_month = query_vec(
         &conn,
         "SELECT strftime('%Y-%m', created_at) as m, COUNT(*) FROM sessions \
          WHERE created_at IS NOT NULL GROUP BY m ORDER BY m",
-        |row| Ok(MonthCount { month: row.get(0)?, count: row.get(1)? }),
+        |row| {
+            Ok(MonthCount {
+                month: row.get(0)?,
+                count: row.get(1)?,
+            })
+        },
     );
     let turns_by_day = query_vec(
         &conn,
         "SELECT date(timestamp) as d, COUNT(*) FROM turns \
          WHERE timestamp >= date('now', '-30 days') AND timestamp IS NOT NULL \
          GROUP BY d ORDER BY d",
-        |row| Ok(DateCount { date: row.get(0)?, count: row.get(1)? }),
+        |row| {
+            Ok(DateCount {
+                date: row.get(0)?,
+                count: row.get(1)?,
+            })
+        },
     );
     let top_repositories = query_vec(
         &conn,
@@ -263,7 +276,12 @@ pub fn get_history_stats() -> anyhow::Result<HistoryStats> {
         "SELECT branch, COUNT(*) as cnt FROM sessions \
          WHERE branch IS NOT NULL AND branch != '' \
          GROUP BY branch ORDER BY cnt DESC LIMIT 10",
-        |row| Ok(NameCount { name: row.get(0)?, count: row.get(1)? }),
+        |row| {
+            Ok(NameCount {
+                name: row.get(0)?,
+                count: row.get(1)?,
+            })
+        },
     );
     let recent_sessions = query_vec(
         &conn,
@@ -300,13 +318,23 @@ pub fn get_history_stats() -> anyhow::Result<HistoryStats> {
         "SELECT tool_name, COUNT(*) as cnt FROM session_files \
          WHERE tool_name IS NOT NULL AND tool_name != '' \
          GROUP BY tool_name ORDER BY cnt DESC",
-        |row| Ok(NameCount { name: row.get(0)?, count: row.get(1)? }),
+        |row| {
+            Ok(NameCount {
+                name: row.get(0)?,
+                count: row.get(1)?,
+            })
+        },
     );
     let active_hours = query_vec(
         &conn,
         "SELECT CAST(strftime('%H', created_at) AS INTEGER) as h, COUNT(*) \
          FROM sessions WHERE created_at IS NOT NULL GROUP BY h ORDER BY h",
-        |row| Ok(HourCount { hour: row.get(0)?, count: row.get(1)? }),
+        |row| {
+            Ok(HourCount {
+                hour: row.get(0)?,
+                count: row.get(1)?,
+            })
+        },
     );
 
     let earliest: Option<String> = conn
@@ -349,10 +377,7 @@ fn query_vec<T>(
     mapper: impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<T>,
 ) -> Vec<T> {
     conn.prepare(sql)
-        .and_then(|mut stmt| {
-            stmt.query_map([], mapper)?
-                .collect::<Result<Vec<_>, _>>()
-        })
+        .and_then(|mut stmt| stmt.query_map([], mapper)?.collect::<Result<Vec<_>, _>>())
         .unwrap_or_default()
 }
 
@@ -399,16 +424,37 @@ pub struct CopilotUsageStats {
 
 /// Aggregate usage statistics from the pre-built stats cache only.
 /// session-store.db data is merged into the cache during refresh().
-pub fn get_copilot_usage(cache: &crate::stats_cache::StatsCache) -> anyhow::Result<CopilotUsageStats> {
+pub fn get_copilot_usage(
+    cache: &crate::stats_cache::StatsCache,
+) -> anyhow::Result<CopilotUsageStats> {
     let cached = cache.get_stats();
 
     Ok(CopilotUsageStats {
         total_sessions: cached.total_sessions,
         total_turns: cached.total_turns,
         total_files_edited: cached.total_files_edited,
-        model_usage: cached.model_usage.into_iter().map(|(m, c)| ModelUsage { model: m, count: c }).collect(),
-        sessions_by_month: cached.sessions_by_month.into_iter().map(|(m, s, t)| MonthUsage { month: m, sessions: s, turns: t }).collect(),
-        recent_model_changes: cached.recent_model_changes.into_iter().map(|(m, t)| ModelChange { model: m, timestamp: t }).collect(),
+        model_usage: cached
+            .model_usage
+            .into_iter()
+            .map(|(m, c)| ModelUsage { model: m, count: c })
+            .collect(),
+        sessions_by_month: cached
+            .sessions_by_month
+            .into_iter()
+            .map(|(m, s, t)| MonthUsage {
+                month: m,
+                sessions: s,
+                turns: t,
+            })
+            .collect(),
+        recent_model_changes: cached
+            .recent_model_changes
+            .into_iter()
+            .map(|(m, t)| ModelChange {
+                model: m,
+                timestamp: t,
+            })
+            .collect(),
         total_tool_executions: cached.total_tool_executions,
         event_type_counts: HashMap::new(),
     })

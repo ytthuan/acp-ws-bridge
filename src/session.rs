@@ -374,7 +374,8 @@ mod tests {
         let updated = sm.get_session(&info.id).await.unwrap();
         assert_eq!(updated.status, SessionStatus::Idle);
 
-        sm.update_status(&info.id, SessionStatus::Disconnected).await;
+        sm.update_status(&info.id, SessionStatus::Disconnected)
+            .await;
         let updated = sm.get_session(&info.id).await.unwrap();
         assert_eq!(updated.status, SessionStatus::Disconnected);
 
@@ -387,7 +388,12 @@ mod tests {
     async fn test_activity_tracking() {
         let sm = SessionManager::new();
         let info = sm.create_session().await;
-        let before = sm.get_session(&info.id).await.unwrap().last_activity.clone();
+        let before = sm
+            .get_session(&info.id)
+            .await
+            .unwrap()
+            .last_activity
+            .clone();
 
         // Small delay to ensure timestamp changes
         tokio::time::sleep(Duration::from_millis(10)).await;
@@ -438,7 +444,8 @@ mod tests {
         let info = sm.create_session().await;
         assert!(info.copilot_session_id.is_none());
 
-        sm.set_copilot_session_id(&info.id, "copilot-123".to_string()).await;
+        sm.set_copilot_session_id(&info.id, "copilot-123".to_string())
+            .await;
         let updated = sm.get_session(&info.id).await.unwrap();
         assert_eq!(updated.copilot_session_id.as_deref(), Some("copilot-123"));
     }
@@ -506,7 +513,8 @@ mod tests {
         let info = sm.create_session().await;
         assert!(!sm.is_disconnected(&info.id).await);
 
-        sm.update_status(&info.id, SessionStatus::Disconnected).await;
+        sm.update_status(&info.id, SessionStatus::Disconnected)
+            .await;
         assert!(sm.is_disconnected(&info.id).await);
     }
 

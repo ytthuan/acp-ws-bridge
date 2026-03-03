@@ -43,9 +43,7 @@ pub async fn connect(host: &str, port: u16) -> anyhow::Result<(NdjsonReader, Ndj
         NdjsonReader {
             reader: BufReader::new(read_half),
         },
-        NdjsonWriter {
-            writer: write_half,
-        },
+        NdjsonWriter { writer: write_half },
     ))
 }
 
@@ -114,10 +112,7 @@ mod tests {
         assert_eq!(msg.id, Some(serde_json::json!(1)));
         assert!(msg.method.is_none());
         assert!(msg.params.is_none());
-        assert_eq!(
-            msg.result,
-            Some(serde_json::json!({"sessionId": "xyz"}))
-        );
+        assert_eq!(msg.result, Some(serde_json::json!({"sessionId": "xyz"})));
         assert!(msg.error.is_none());
     }
 
@@ -138,7 +133,8 @@ mod tests {
 
     #[test]
     fn test_jsonrpc_error_response() {
-        let json = r#"{"jsonrpc":"2.0","id":2,"error":{"code":-32600,"message":"Invalid Request"}}"#;
+        let json =
+            r#"{"jsonrpc":"2.0","id":2,"error":{"code":-32600,"message":"Invalid Request"}}"#;
         let msg: JsonRpcMessage = serde_json::from_str(json).unwrap();
         assert_eq!(msg.id, Some(serde_json::json!(2)));
         assert!(msg.result.is_none());
@@ -185,7 +181,10 @@ mod tests {
             error: None,
         };
         let line = serde_json::to_string(&msg).unwrap();
-        assert!(!line.contains('\n'), "serialized message must not contain newlines");
+        assert!(
+            !line.contains('\n'),
+            "serialized message must not contain newlines"
+        );
         // Simulate NDJSON framing
         let framed = format!("{}\n", line);
         assert!(framed.ends_with('\n'));
@@ -223,8 +222,14 @@ mod tests {
             let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
             let (_read_half, write_half) = stream.into_split();
             let mut writer = NdjsonWriter { writer: write_half };
-            writer.write_line(r#"{"jsonrpc":"2.0","id":1,"method":"test"}"#).await.unwrap();
-            writer.write_line(r#"{"jsonrpc":"2.0","id":2,"method":"test2"}"#).await.unwrap();
+            writer
+                .write_line(r#"{"jsonrpc":"2.0","id":1,"method":"test"}"#)
+                .await
+                .unwrap();
+            writer
+                .write_line(r#"{"jsonrpc":"2.0","id":2,"method":"test2"}"#)
+                .await
+                .unwrap();
             drop(writer);
         });
 

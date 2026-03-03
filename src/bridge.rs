@@ -50,7 +50,7 @@ impl Bridge {
             session_manager: self.session_manager.clone(),
             copilot_host: self.config.copilot_host.clone(),
             copilot_port: self.config.copilot_port,
-            copilot_mode: self.config.copilot_mode.clone(),
+            copilot_mode: self.config.effective_copilot_mode().to_string(),
             copilot_path: self.config.copilot_path.clone(),
             copilot_args: self.config.copilot_args.clone(),
         };
@@ -67,20 +67,14 @@ impl Bridge {
             (Some(cert), Some(key)) => {
                 let tls_acceptor = tls::load_tls_config(cert, key)?;
                 tracing::info!("TLS enabled (cert: {}, key: {})", cert, key);
-                tracing::info!(
-                    "WebSocket listening on wss://{}",
-                    addr
-                );
+                tracing::info!("WebSocket listening on wss://{}", addr);
                 serve_with_tls(listener, app, tls_acceptor).await
             }
             (Some(_), None) | (None, Some(_)) => {
                 anyhow::bail!("Both --tls-cert and --tls-key must be provided for TLS");
             }
             _ => {
-                tracing::info!(
-                    "WebSocket listening on ws://{}",
-                    addr
-                );
+                tracing::info!("WebSocket listening on ws://{}", addr);
                 axum::serve(
                     listener,
                     app.into_make_service_with_connect_info::<SocketAddr>(),
@@ -165,11 +159,8 @@ impl hyper::service::Service<hyper::Request<hyper::body::Incoming>> for TlsServi
         let peer_addr = self.peer_addr;
         Box::pin(async move {
             let (mut parts, body) = req.into_parts();
-            parts
-                .extensions
-                .insert(ConnectInfo(peer_addr));
-            let req =
-                axum::http::Request::from_parts(parts, axum::body::Body::new(body));
+            parts.extensions.insert(ConnectInfo(peer_addr));
+            let req = axum::http::Request::from_parts(parts, axum::body::Body::new(body));
             // Router is always ready; safe to call without poll_ready
             tower::Service::call(&mut router, req).await
         })
@@ -213,10 +204,7 @@ async fn serve_with_tls(
             };
 
             let builder = auto::Builder::new(TokioExecutor::new());
-            if let Err(e) = builder
-                .serve_connection_with_upgrades(io, service)
-                .await
-            {
+            if let Err(e) = builder.serve_connection_with_upgrades(io, service).await {
                 tracing::error!("TLS connection error for {}: {}", peer_addr, e);
             }
         });

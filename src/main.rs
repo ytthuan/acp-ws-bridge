@@ -14,14 +14,22 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bridge::Bridge;
-use clap::Parser;
+use clap::{CommandFactory, FromArgMatches};
 use config::Config;
-use session::{SessionManager, spawn_idle_checker};
+use session::{spawn_idle_checker, SessionManager};
 use tracing::info;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let config = Config::parse();
+    let matches = Config::command().get_matches();
+    let mut config = Config::from_arg_matches(&matches)?;
+
+    // Auto-detect TCP mode: if --copilot-port was explicitly provided but --copilot-mode was not
+    if config.copilot_mode.is_none()
+        && matches.value_source("copilot_port") == Some(clap::parser::ValueSource::CommandLine)
+    {
+        config.copilot_mode = Some("tcp".to_string());
+    }
 
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -51,7 +59,7 @@ async fn main() -> anyhow::Result<()> {
     let _copilot_process = if !config.spawn_copilot {
         info!("Copilot CLI auto-spawn disabled (--spawn-copilot false)");
         None
-    } else if config.copilot_mode == "stdio" {
+    } else if config.effective_copilot_mode() == "stdio" {
         // In stdio mode, each WebSocket client spawns its own Copilot CLI process.
         // No shared process needed at startup.
         info!(
@@ -83,7 +91,7 @@ async fn main() -> anyhow::Result<()> {
 
     info!("ACP WebSocket Bridge starting...");
     info!("WebSocket: {}:{}", config.listen_addr, config.ws_port);
-    if config.copilot_mode == "stdio" {
+    if config.effective_copilot_mode() == "stdio" {
         info!("Copilot CLI mode: stdio (per-client process)");
     } else {
         info!(
@@ -139,7 +147,8 @@ async fn main() -> anyhow::Result<()> {
             Err(e) => {
                 tracing::warn!(
                     "REST API failed to bind port {}: {} (continuing without REST API)",
-                    api_port, e
+                    api_port,
+                    e
                 );
             }
         }

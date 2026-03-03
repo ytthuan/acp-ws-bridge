@@ -3,7 +3,10 @@
 use clap::Parser;
 
 #[derive(Parser, Debug, Clone)]
-#[command(name = "acp-ws-bridge", about = "WebSocket bridge for GitHub Copilot CLI ACP")]
+#[command(
+    name = "acp-ws-bridge",
+    about = "WebSocket bridge for GitHub Copilot CLI ACP"
+)]
 pub struct Config {
     /// WebSocket server listen port
     #[arg(long, default_value = "8765")]
@@ -61,9 +64,22 @@ pub struct Config {
     #[arg(long)]
     pub copilot_args: Vec<String>,
 
-    /// Copilot CLI transport mode: "tcp" or "stdio"
-    #[arg(long, default_value = "stdio")]
-    pub copilot_mode: String,
+    /// Copilot CLI transport mode: "tcp" or "stdio".
+    /// Auto-detected as "tcp" when --copilot-port is explicitly provided.
+    #[arg(long)]
+    pub copilot_mode: Option<String>,
+}
+
+impl Config {
+    /// Resolved copilot mode: if explicitly set use that, otherwise auto-detect.
+    /// When --copilot-port is provided without --copilot-mode, assume TCP.
+    pub fn effective_copilot_mode(&self) -> &str {
+        if let Some(ref mode) = self.copilot_mode {
+            mode.as_str()
+        } else {
+            "stdio"
+        }
+    }
 }
 
 #[cfg(test)]
@@ -88,21 +104,30 @@ mod tests {
         assert_eq!(config.copilot_path, "copilot");
         assert!(config.spawn_copilot);
         assert!(config.copilot_args.is_empty());
-        assert_eq!(config.copilot_mode, "stdio");
+        assert!(config.copilot_mode.is_none());
+        assert_eq!(config.effective_copilot_mode(), "stdio");
     }
 
     #[test]
     fn test_custom_config() {
         let config = Config::parse_from([
             "test",
-            "--ws-port", "9999",
-            "--copilot-port", "4000",
-            "--copilot-host", "192.168.1.1",
-            "--listen-addr", "127.0.0.1",
-            "--idle-timeout-secs", "3600",
-            "--tls-cert", "/tmp/cert.pem",
-            "--tls-key", "/tmp/key.pem",
-            "--log-level", "debug",
+            "--ws-port",
+            "9999",
+            "--copilot-port",
+            "4000",
+            "--copilot-host",
+            "192.168.1.1",
+            "--listen-addr",
+            "127.0.0.1",
+            "--idle-timeout-secs",
+            "3600",
+            "--tls-cert",
+            "/tmp/cert.pem",
+            "--tls-key",
+            "/tmp/key.pem",
+            "--log-level",
+            "debug",
         ]);
         assert_eq!(config.ws_port, 9999);
         assert_eq!(config.copilot_port, 4000);
