@@ -67,6 +67,7 @@ model: GPT-5.3-Codex (copilot)
 | **`cargo test` must pass** | `cargo test` | Fix failing tests |
 | **`cargo clippy` clean** | `cargo clippy -- -D warnings` | Fix all warnings |
 | **`cargo fmt` check** | `cargo fmt --check` | Format code |
+| **Agent definitions stay valid** | `bash scripts/validate_agents.sh` (if touching `AGENTS.md` or `.github/agents/`) | Fix references/frontmatter before reporting |
 | **Transparent relay** | No message modification | Bridge MUST NOT parse/transform ACP messages |
 | **Use `serde_json::Value`** | For message relay | Avoid stripping unknown fields |
 | **Structured logging** | `tracing` crate | Use `tracing::info!`, `tracing::error!`, etc. |
@@ -137,8 +138,8 @@ pub struct Config {
     pub spawn_copilot: bool,
     #[arg(long)]
     pub copilot_args: Vec<String>,
-    #[arg(long, default_value = "stdio")]
-    pub copilot_mode: String,
+    #[arg(long)]
+    pub copilot_mode: Option<String>,
 }
 ```
 
@@ -189,8 +190,9 @@ cargo run -- --ws-port 8765 --copilot-mode tcp --copilot-port 3000
 cargo build
 cargo build --release
 cargo test
-cargo clippy -- -D warnings
-cargo fmt --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo fmt --all --check
+bash scripts/validate_agents.sh    # when changing AGENTS.md or .github/agents/*
 cargo fmt
 cargo run -- --ws-port 8765
 cargo run -- --ws-port 8765 --generate-cert

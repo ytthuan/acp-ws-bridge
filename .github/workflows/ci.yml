@@ -35,6 +35,9 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all --check
 
+      - name: Validate agent definitions
+        run: bash scripts/validate_agents.sh
+
       - name: Lint
         run: cargo clippy --all-targets --all-features -- -D warnings
 

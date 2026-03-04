@@ -14,6 +14,7 @@ use crate::session::SessionManager;
 
 const PING_INTERVAL: Duration = Duration::from_secs(120);
 const PONG_TIMEOUT: Duration = Duration::from_secs(1800);
+const PAYLOAD_LOG_TRUNCATE_MAX: usize = 300;
 
 /// Extract the ACP method name from a JSON string, if present.
 fn extract_method(json: &str) -> Option<String> {
@@ -153,7 +154,7 @@ pub async fn relay_lazy(
                                 tracing::error!("Failed to write to TCP: {}", e);
                                 break;
                             }
-                            tracing::info!("WS→CLI: {}", truncate(trimmed, 300));
+                            tracing::info!("WS→CLI: {}", payload_for_log(trimmed));
                         }
                     }
                     Ok(Message::Close(_)) => {
@@ -351,7 +352,7 @@ pub async fn relay_stdio(
                                 tracing::error!("Failed to flush stdin: {}", e);
                                 break;
                             }
-                            tracing::info!("WS→CLI: {}", truncate(trimmed, 300));
+                            tracing::info!("WS→CLI: {}", payload_for_log(trimmed));
                         }
                     }
                     Ok(Message::Close(_)) => {
@@ -456,7 +457,7 @@ async fn stdio_reader_task(
                     continue;
                 }
 
-                tracing::info!("CLI→WS: {}", truncate(trimmed, 300));
+                tracing::info!("CLI→WS: {}", payload_for_log(trimmed));
                 sm.record_activity(session_id).await;
 
                 if let Some(method) = extract_method(trimmed) {
@@ -501,7 +502,7 @@ async fn tcp_reader_task(
     loop {
         match tcp_reader.read_line().await {
             Ok(Some(line)) => {
-                tracing::info!("CLI→WS: {}", truncate(&line, 300));
+                tracing::info!("CLI→WS: {}", payload_for_log(&line));
                 sm.record_activity(session_id).await;
 
                 if let Some(method) = extract_method(&line) {
@@ -533,6 +534,18 @@ async fn tcp_reader_task(
                 break;
             }
         }
+    }
+}
+
+fn payload_for_log(s: &str) -> &str {
+    payload_for_log_with_debug(s, tracing::enabled!(tracing::Level::DEBUG))
+}
+
+fn payload_for_log_with_debug(s: &str, debug_enabled: bool) -> &str {
+    if debug_enabled {
+        s
+    } else {
+        truncate(s, PAYLOAD_LOG_TRUNCATE_MAX)
     }
 }
 
@@ -619,6 +632,20 @@ mod tests {
     #[test]
     fn test_truncate_empty() {
         assert_eq!(truncate("", 5), "");
+    }
+
+    #[test]
+    fn test_payload_for_log_with_debug_enabled_returns_full_string() {
+        let input = "a".repeat(PAYLOAD_LOG_TRUNCATE_MAX + 10);
+        assert_eq!(payload_for_log_with_debug(&input, true), input);
+    }
+
+    #[test]
+    fn test_payload_for_log_with_debug_disabled_truncates() {
+        let input = "a".repeat(PAYLOAD_LOG_TRUNCATE_MAX + 10);
+        let truncated = payload_for_log_with_debug(&input, false);
+        assert_eq!(truncated.len(), PAYLOAD_LOG_TRUNCATE_MAX);
+        assert_eq!(truncated, &input[..PAYLOAD_LOG_TRUNCATE_MAX]);
     }
 
     #[test]

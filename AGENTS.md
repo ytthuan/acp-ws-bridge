@@ -38,12 +38,13 @@
 
 ```
 src/
-├── main.rs          → Entry point, CLI arg parsing
-├── config.rs        → Config struct (clap)
-├── server.rs        → WebSocket server, connection handling
-├── relay.rs         → stdio/TCP ↔ WebSocket relay logic
-├── copilot.rs       → Copilot CLI spawn (stdio/tcp modes)
-└── error.rs         → BridgeError types
+├── main.rs          → Entry point, config parsing, server startup
+├── config.rs        → CLI config struct (clap)
+├── bridge.rs        → WebSocket/HTTP server wiring
+├── ws.rs            → WebSocket session relay (stdio/tcp, keepalive)
+├── session.rs       → Session lifecycle, idle timeout, command cache
+├── copilot.rs       → Copilot CLI process spawn (stdio/tcp modes)
+└── api.rs           → REST API for health/sessions/stats/history
 Cargo.toml
 ```
 
@@ -56,6 +57,7 @@ cargo build
 cargo test
 cargo clippy -- -D warnings
 cargo fmt --check
+bash scripts/validate_agents.sh
 cargo run -- --ws-port 8765          # stdio mode (default)
 cargo run -- --ws-port 8765 --log-level debug
 ```
