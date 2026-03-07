@@ -36,7 +36,8 @@ impl CopilotProcess {
         );
 
         let mut cmd = Command::new(copilot_path);
-        cmd.arg("--acp")
+        cmd.env("COPILOT_CLI", "1") // Let git hooks detect Copilot CLI subprocesses
+            .arg("--acp")
             .arg("--port")
             .arg(port.to_string())
             .arg("--resume") // Enable loading sessions from CLI history
@@ -80,7 +81,8 @@ impl CopilotProcess {
         );
 
         let mut cmd = Command::new(copilot_path);
-        cmd.arg("--acp")
+        cmd.env("COPILOT_CLI", "1") // Let git hooks detect Copilot CLI subprocesses
+            .arg("--acp")
             .arg("--stdio")
             .arg("--resume") // Enable loading sessions from CLI history
             .args(extra_args)
@@ -141,4 +143,30 @@ async fn wait_for_port(host: &str, port: u16, timeout: Duration) -> bool {
     }
 
     false
+}
+
+/// Detect the installed Copilot CLI version by running `copilot --version`.
+pub async fn detect_version(copilot_path: &str) -> Option<String> {
+    match Command::new(copilot_path)
+        .arg("--version")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .await
+    {
+        Ok(output) if output.status.success() => {
+            let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if raw.is_empty() {
+                None
+            } else {
+                Some(raw)
+            }
+        }
+        Ok(_) => None,
+        Err(e) => {
+            tracing::debug!("Could not detect Copilot CLI version: {}", e);
+            None
+        }
+    }
 }

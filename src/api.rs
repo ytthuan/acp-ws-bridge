@@ -15,12 +15,21 @@ use crate::history;
 use crate::session::{SessionInfo, SessionManager, SessionStats};
 use crate::stats_cache::StatsCache;
 
+/// Detected Copilot CLI information (populated at startup).
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct CopilotInfo {
+    pub version: Option<String>,
+    pub path: String,
+    pub mode: String,
+}
+
 /// Shared state for API handlers.
 #[derive(Clone)]
 struct ApiState {
     session_manager: SessionManager,
     start_time: Arc<Instant>,
     stats_cache: Arc<StatsCache>,
+    copilot_info: CopilotInfo,
 }
 
 /// GET /health — Health check
@@ -29,6 +38,7 @@ async fn health(State(state): State<ApiState>) -> Json<serde_json::Value> {
     Json(serde_json::json!({
         "status": "ok",
         "version": env!("CARGO_PKG_VERSION"),
+        "copilot_cli_version": state.copilot_info.version,
         "uptime_secs": uptime
     }))
 }
@@ -126,12 +136,100 @@ async fn get_copilot_usage(State(state): State<ApiState>) -> impl IntoResponse {
     }
 }
 
+/// GET /api/copilot/info — Copilot CLI metadata and capabilities
+async fn get_copilot_info(State(state): State<ApiState>) -> Json<serde_json::Value> {
+    let info = &state.copilot_info;
+    let version_str = info.version.as_deref().unwrap_or("unknown");
+
+    // Determine GA status and features based on detected version
+    let is_ga = is_copilot_ga(version_str);
+    let features = detect_features(version_str);
+
+    Json(serde_json::json!({
+        "version": info.version,
+        "path": info.path,
+        "mode": info.mode,
+        "ga": is_ga,
+        "features": features
+    }))
+}
+
+/// Returns true if the detected Copilot CLI version is GA (>= 0.0.418 or >= 1.0.0).
+fn is_copilot_ga(version: &str) -> bool {
+    // Strip leading 'v' or any prefix text (e.g. "GitHub Copilot CLI v1.0.2")
+    let v = version
+        .rsplit(' ')
+        .next()
+        .unwrap_or(version)
+        .trim_start_matches('v');
+
+    let parts: Vec<&str> = v.split('.').collect();
+    if parts.len() < 3 {
+        return false;
+    }
+    let major = parts[0].parse::<u32>().unwrap_or(0);
+    let minor = parts[1].parse::<u32>().unwrap_or(0);
+    let patch = parts[2].parse::<u32>().unwrap_or(0);
+
+    if major >= 1 {
+        return true;
+    }
+    // Pre-1.0: GA was v0.0.418
+    major == 0 && minor == 0 && patch >= 418
+}
+
+/// Detect available features based on CLI version.
+fn detect_features(version: &str) -> Vec<&'static str> {
+    let v = version
+        .rsplit(' ')
+        .next()
+        .unwrap_or(version)
+        .trim_start_matches('v');
+
+    let parts: Vec<&str> = v.split('.').collect();
+    let (major, minor, patch) = if parts.len() >= 3 {
+        (
+            parts[0].parse::<u32>().unwrap_or(0),
+            parts[1].parse::<u32>().unwrap_or(0),
+            parts[2].parse::<u32>().unwrap_or(0),
+        )
+    } else {
+        return vec![];
+    };
+
+    let at_least =
+        |maj: u32, min: u32, pat: u32| -> bool { (major, minor, patch) >= (maj, min, pat) };
+
+    let mut features = Vec::new();
+    if at_least(0, 0, 418) {
+        features.push("ga");
+    }
+    if at_least(0, 0, 421) {
+        features.push("reasoning_effort");
+        features.push("mcp_elicitations");
+    }
+    if at_least(0, 0, 422) {
+        features.push("exit_plan_mode");
+        features.push("session_metrics");
+        features.push("output_format_json");
+    }
+    if at_least(1, 0, 0) {
+        features.push("v1_stable");
+    }
+    features
+}
+
 /// Build the axum Router for the REST API.
-pub fn api_router(session_manager: SessionManager, stats_cache: Arc<StatsCache>) -> Router {
+pub fn api_router(
+    session_manager: SessionManager,
+    stats_cache: Arc<StatsCache>,
+    copilot_info: CopilotInfo,
+) -> Router {
     let state = ApiState {
         session_manager,
         start_time: Arc::new(Instant::now()),
         stats_cache,
+        copilot_info,
     };
 
     Router::new()
@@ -148,6 +246,7 @@ pub fn api_router(session_manager: SessionManager, stats_cache: Arc<StatsCache>)
         )
         .route("/api/history/stats", get(get_history_stats))
         .route("/api/copilot/usage", get(get_copilot_usage))
+        .route("/api/copilot/info", get(get_copilot_info))
         .layer(
             CorsLayer::new()
                 .allow_origin(tower_http::cors::Any)
@@ -169,8 +268,20 @@ mod tests {
     use http_body_util::BodyExt;
     use tower::ServiceExt;
 
+    fn test_copilot_info() -> CopilotInfo {
+        CopilotInfo {
+            version: Some("1.0.2".to_string()),
+            path: "copilot".to_string(),
+            mode: "stdio".to_string(),
+        }
+    }
+
     fn test_app() -> Router {
-        api_router(SessionManager::new(), Arc::new(StatsCache::new()))
+        api_router(
+            SessionManager::new(),
+            Arc::new(StatsCache::new()),
+            test_copilot_info(),
+        )
     }
 
     async fn body_json(body: Body) -> serde_json::Value {
@@ -191,7 +302,52 @@ mod tests {
         let json = body_json(resp.into_body()).await;
         assert_eq!(json["status"], "ok");
         assert!(json["version"].is_string());
+        assert_eq!(json["copilot_cli_version"], "1.0.2");
         assert!(json["uptime_secs"].is_number());
+    }
+
+    #[tokio::test]
+    async fn test_copilot_info_endpoint() {
+        let app = test_app();
+        let req = Request::builder()
+            .uri("/api/copilot/info")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let json = body_json(resp.into_body()).await;
+        assert_eq!(json["version"], "1.0.2");
+        assert_eq!(json["path"], "copilot");
+        assert_eq!(json["mode"], "stdio");
+        assert_eq!(json["ga"], true);
+        let features = json["features"].as_array().unwrap();
+        assert!(features.iter().any(|f| f == "v1_stable"));
+        assert!(features.iter().any(|f| f == "reasoning_effort"));
+    }
+
+    #[test]
+    fn test_is_copilot_ga() {
+        assert!(is_copilot_ga("1.0.2"));
+        assert!(is_copilot_ga("0.0.418"));
+        assert!(is_copilot_ga("0.0.422"));
+        assert!(!is_copilot_ga("0.0.417"));
+        assert!(!is_copilot_ga("0.0.100"));
+        assert!(is_copilot_ga("GitHub Copilot CLI v1.0.2"));
+    }
+
+    #[test]
+    fn test_detect_features() {
+        let f = detect_features("1.0.2");
+        assert!(f.contains(&"ga"));
+        assert!(f.contains(&"reasoning_effort"));
+        assert!(f.contains(&"exit_plan_mode"));
+        assert!(f.contains(&"v1_stable"));
+
+        let f2 = detect_features("0.0.420");
+        assert!(f2.contains(&"ga"));
+        assert!(!f2.contains(&"reasoning_effort"));
+        assert!(!f2.contains(&"v1_stable"));
     }
 
     #[tokio::test]
@@ -258,6 +414,7 @@ mod tests {
         let app = api_router(
             sm,
             std::sync::Arc::new(crate::stats_cache::StatsCache::new()),
+            test_copilot_info(),
         );
         let req = Request::builder()
             .uri("/api/sessions")
@@ -278,6 +435,7 @@ mod tests {
         let app = api_router(
             sm,
             std::sync::Arc::new(crate::stats_cache::StatsCache::new()),
+            test_copilot_info(),
         );
         let req = Request::builder()
             .uri(format!("/api/sessions/{}", info.id))
@@ -298,6 +456,7 @@ mod tests {
         let app = api_router(
             sm,
             std::sync::Arc::new(crate::stats_cache::StatsCache::new()),
+            test_copilot_info(),
         );
         let req = Request::builder()
             .method("DELETE")
@@ -324,6 +483,7 @@ mod tests {
         let app = api_router(
             sm,
             std::sync::Arc::new(crate::stats_cache::StatsCache::new()),
+            test_copilot_info(),
         );
         let req = Request::builder()
             .uri("/api/stats")
@@ -358,6 +518,7 @@ mod tests {
         let app = api_router(
             sm,
             std::sync::Arc::new(crate::stats_cache::StatsCache::new()),
+            test_copilot_info(),
         );
         let req = Request::builder()
             .uri(format!("/api/sessions/{}/commands", info.id))
@@ -379,6 +540,7 @@ mod tests {
         let app = api_router(
             sm,
             std::sync::Arc::new(crate::stats_cache::StatsCache::new()),
+            test_copilot_info(),
         );
         let req = Request::builder()
             .uri(format!("/api/sessions/{}/commands", info.id))

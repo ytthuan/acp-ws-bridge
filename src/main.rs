@@ -100,6 +100,14 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
+    // Detect Copilot CLI version
+    let copilot_cli_version = copilot::detect_version(&config.copilot_path).await;
+    if let Some(ref v) = copilot_cli_version {
+        info!("Copilot CLI version: {}", v);
+    } else {
+        tracing::warn!("Could not detect Copilot CLI version");
+    }
+
     let session_manager = SessionManager::new();
 
     // Build stats cache and start background refresh task.
@@ -132,7 +140,15 @@ async fn main() -> anyhow::Result<()> {
 
     // Spawn REST API server on separate port (non-fatal if port in use)
     let api_port = config.api_port.unwrap_or(config.ws_port.saturating_add(1));
-    let api_router = api::api_router(session_manager.clone(), stats_cache);
+    let api_router = api::api_router(
+        session_manager.clone(),
+        stats_cache,
+        api::CopilotInfo {
+            version: copilot_cli_version,
+            path: config.copilot_path.clone(),
+            mode: config.effective_copilot_mode().to_string(),
+        },
+    );
     let api_addr = std::net::SocketAddr::from(([0, 0, 0, 0], api_port));
 
     // Load TLS config once — shared by both WebSocket and REST API servers

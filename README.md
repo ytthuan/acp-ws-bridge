@@ -13,9 +13,20 @@ WebSocket-to-stdio bridge for relaying [Agent Client Protocol (ACP)](https://age
 
 - **Transparent relay** — passes all ACP JSON-RPC messages without modification
 - **WebSocket + optional TLS** — secure remote connections
-- **REST API** — session history, stats, Copilot CLI usage metrics
+- **REST API** — session history, stats, Copilot CLI usage metrics and capabilities
+- **Copilot CLI version detection** — detects CLI version at startup, exposes via API
 - **Ping/pong keepalive** — detects dead connections
 - **Session management** — tracks active sessions with `--resume` support
+
+## Compatibility
+
+| Copilot CLI Version | Status |
+|---|---|
+| **1.0.x** (GA) | ✅ Fully supported |
+| 0.0.418 – 0.0.423 | ✅ Fully supported |
+| < 0.0.418 (pre-GA) | ⚠️ Basic relay works; some features may be missing |
+
+New ACP protocol methods (exitPlanMode.request, MCP elicitations, reasoning effort config) are transparently relayed without bridge changes.
 
 ## Quick Start
 
@@ -63,6 +74,24 @@ Prebuilt release binaries are published on GitHub Releases for:
 | `--copilot-path` | `copilot` | Path to Copilot CLI |
 
 When `--tls-cert` and `--tls-key` are provided, both the WebSocket server (wss://) and the REST API (HTTPS) use the same TLS configuration.
+
+## REST API
+
+The REST API runs on a separate port (default: `--ws-port` + 1).
+
+| Endpoint | Description |
+|---|---|
+| `GET /health` | Health check with bridge version, Copilot CLI version, uptime |
+| `GET /api/sessions` | List active WebSocket sessions |
+| `GET /api/sessions/:id` | Get session details |
+| `DELETE /api/sessions/:id` | Delete a session |
+| `GET /api/sessions/:id/commands` | Get cached ACP commands for a session |
+| `GET /api/stats` | Aggregate session statistics |
+| `GET /api/copilot/info` | Copilot CLI version, path, mode, GA status, feature capabilities |
+| `GET /api/copilot/usage` | Copilot CLI usage statistics (model usage, tool executions) |
+| `GET /api/history/sessions` | Historical sessions from `~/.copilot/session-store.db` |
+| `GET /api/history/sessions/:id/turns` | Session conversation turns |
+| `GET /api/history/stats` | Aggregate historical statistics |
 
 ## Generate TLS Cert/Key by Script
 
