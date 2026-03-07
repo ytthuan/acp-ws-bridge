@@ -13,9 +13,10 @@ This repository uses a tag-driven release pipeline that publishes:
 
 ## Normal Release Flow
 
-1. Bump `[package].version` in `Cargo.toml`.
-2. Merge to `main`.
-3. Create and push a matching tag:
+1. Review `CHANGELOG.md` and move any notable `Unreleased` entries into the release notes.
+2. Bump `[package].version` in `Cargo.toml`.
+3. Merge to `main`.
+4. Create and push a matching tag:
 
 ```bash
 git tag vX.Y.Z

@@ -1,5 +1,10 @@
 # acp-ws-bridge
 
+[![CI](https://github.com/ytthuan/acp-ws-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/ytthuan/acp-ws-bridge/actions/workflows/ci.yml)
+[![Coverage](https://github.com/ytthuan/acp-ws-bridge/actions/workflows/coverage.yml/badge.svg)](https://github.com/ytthuan/acp-ws-bridge/actions/workflows/coverage.yml)
+[![Crates.io](https://img.shields.io/crates/v/acp-ws-bridge.svg)](https://crates.io/crates/acp-ws-bridge)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 WebSocket-to-stdio bridge for relaying [Agent Client Protocol (ACP)](https://agentclientprotocol.com) JSON-RPC messages between a remote client (e.g., iOS app) and GitHub Copilot CLI.
 
 ```
@@ -93,6 +98,16 @@ The REST API runs on a separate port (default: `--ws-port` + 1).
 | `GET /api/history/sessions/:id/turns` | Session conversation turns |
 | `GET /api/history/stats` | Aggregate historical statistics |
 
+## Project Docs
+
+- [Contributing guide](CONTRIBUTING.md)
+- [Code of conduct](CODE_OF_CONDUCT.md)
+- [Security policy](SECURITY.md)
+- [Architecture](docs/architecture.md)
+- [Deployment](docs/deployment.md)
+- [Testing](docs/testing.md)
+- [Release runbook](docs/release.md)
+
 ## Generate TLS Cert/Key by Script
 
 You can use either the built-in generator (`--generate-cert`) or platform scripts below.
@@ -150,6 +165,21 @@ Releases are tag-driven and deterministic:
 3. Create and push a matching tag: `vX.Y.Z`.
 
 The release workflow verifies the tag matches `Cargo.toml`, runs strict checks (`fmt`, `clippy -D warnings`, `test`, package dry-run), publishes to crates.io using the `CARGO_REGISTRY_TOKEN` GitHub secret, and uploads platform binaries to GitHub Releases.
+
+## Contributing and Support
+
+- Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
+- Use the GitHub bug report and feature request templates for public issues.
+- Report vulnerabilities privately according to [SECURITY.md](SECURITY.md).
+- Community interactions in this repository follow [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+
+## Roadmap
+
+Near-term repository improvements are focused on OSS maintainability:
+
+- keep contributor-facing docs current as the bridge evolves
+- improve quality visibility through the dedicated coverage workflow
+- evaluate future release automation and additional examples only after the contributor baseline is stable
 
 ## License
 
