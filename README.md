@@ -156,6 +156,11 @@ Once the files exist, start the installed binary with:
 ```bash
 acp-ws-bridge --ws-port 8765 --tls-cert cert.pem --tls-key key.pem
 ```
+Run in background with:
+
+```bash
+acp-ws-bridge  --ws-port 8700 --acp-command "copilot --acp --stdio" --tls-cert cert.pem --tls-key key.pem  --log-level debug >~/logs/acp-ws-8700.log 2>&1 &
+```
 
 ## Release Process
 
