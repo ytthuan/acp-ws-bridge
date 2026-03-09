@@ -9,8 +9,8 @@ WebSocket-to-stdio bridge for relaying [Agent Client Protocol (ACP)](https://age
 
 ```
 ┌─────────────────┐        stdio         ┌─────────────────────┐       WebSocket        ┌─────────────────┐
-│  GitHub Copilot  │◄──────────────────►│   acp-ws-bridge     │◄──────────────────────►│   Remote Client  │
-│  CLI (Host)      │   JSON-RPC/NDJSON   │   (Rust Server)     │   JSON-RPC/NDJSON      │   (iOS App)     │
+│  GitHub Copilot │◄──────────────────►  │   acp-ws-bridge     │◄──────────────────────►│   Remote Client │
+│  CLI (Host)     │   JSON-RPC/NDJSON    │   (Rust Server)     │   JSON-RPC/NDJSON      │   (iOS App)     │
 └─────────────────┘                      └─────────────────────┘                        └─────────────────┘
 ```
 
@@ -45,8 +45,12 @@ cargo run -- --ws-port 8765
 # With TLS (enables wss:// for WebSocket and HTTPS for REST API)
 cargo run -- --ws-port 8765 --tls-cert cert.pem --tls-key key.pem
 
-# Generate a self-signed certificate
-cargo run -- --generate-cert --cert-hostnames "localhost,127.0.0.1"
+# Generate cert.pem/key.pem with OpenSSL
+openssl req -x509 -newkey rsa:2048 -sha256 -days 365 -nodes \
+  -keyout key.pem \
+  -out cert.pem \
+  -subj "/CN=localhost" \
+  -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
 
 # With custom API port
 cargo run -- --ws-port 8765 --api-port 8766
@@ -123,52 +127,34 @@ The REST API runs on a separate port (default: `--ws-port` + 1).
 - [Testing](docs/testing.md)
 - [Release runbook](docs/release.md)
 
-## Generate TLS Cert/Key by Script
+## Generate TLS Cert/Key with OpenSSL
 
-You can use either the built-in generator (`--generate-cert`) or platform scripts below.
+If you installed `acp-ws-bridge` from crates.io or GitHub Releases and just need `cert.pem` / `key.pem`, you can generate them directly with OpenSSL:
 
-### Cross-platform (recommended)
-
-```bash
-cargo run -- --generate-cert --tls-cert cert.pem --tls-key key.pem --cert-hostnames "localhost,127.0.0.1"
-```
-
-### macOS / Linux (OpenSSL)
+### macOS / Linux
 
 ```bash
-#!/usr/bin/env bash
-set -euo pipefail
-
-CERT_FILE="${1:-cert.pem}"
-KEY_FILE="${2:-key.pem}"
-SUBJ="${3:-/CN=localhost}"
-
 openssl req -x509 -newkey rsa:2048 -sha256 -days 365 -nodes \
-  -keyout "${KEY_FILE}" \
-  -out "${CERT_FILE}" \
-  -subj "${SUBJ}" \
+  -keyout key.pem \
+  -out cert.pem \
+  -subj "/CN=localhost" \
   -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
-
-chmod 600 "${KEY_FILE}"
-echo "Generated ${CERT_FILE} and ${KEY_FILE}"
 ```
 
 ### Windows (PowerShell + OpenSSL)
 
 ```powershell
-param(
-  [string]$CertFile = "cert.pem",
-  [string]$KeyFile = "key.pem",
-  [string]$Subject = "/CN=localhost"
-)
-
 openssl req -x509 -newkey rsa:2048 -sha256 -days 365 -nodes `
-  -keyout $KeyFile `
-  -out $CertFile `
-  -subj $Subject `
+  -keyout key.pem `
+  -out cert.pem `
+  -subj "/CN=localhost" `
   -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+```
 
-Write-Host "Generated $CertFile and $KeyFile"
+Once the files exist, start the installed binary with:
+
+```bash
+acp-ws-bridge --ws-port 8765 --tls-cert cert.pem --tls-key key.pem
 ```
 
 ## Release Process

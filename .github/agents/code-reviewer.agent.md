@@ -2,7 +2,7 @@
 name: code-reviewer
 description: Reviews Rust code changes in acp-ws-bridge for bugs, security vulnerabilities, logic errors, and architectural issues. High signal-to-noise — only surfaces issues that genuinely matter. Will NOT modify code.
 tools: [read, search, execute, todo]
-model: GPT-5.3-Codex (copilot)
+model: gpt-5.3-codex
 ---
 
 # Code Reviewer — Read-Only Executor

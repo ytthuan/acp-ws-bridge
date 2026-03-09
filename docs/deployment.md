@@ -97,10 +97,20 @@ acp-ws-bridge \
   --tls-key /path/to/key.pem
 ```
 
-For local testing you can generate a self-signed certificate:
+For local testing with an installed binary, generate `cert.pem` and `key.pem` with OpenSSL first:
 
 ```bash
-acp-ws-bridge --generate-cert --tls-cert cert.pem --tls-key key.pem
+openssl req -x509 -newkey rsa:2048 -sha256 -days 365 -nodes \
+  -keyout key.pem \
+  -out cert.pem \
+  -subj "/CN=localhost" \
+  -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+```
+
+Then start the bridge with:
+
+```bash
+acp-ws-bridge --ws-port 8765 --api-port 8766 --tls-cert cert.pem --tls-key key.pem
 ```
 
 ## Example systemd unit
