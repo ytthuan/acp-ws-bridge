@@ -144,7 +144,7 @@ openssl req -x509 -newkey rsa:2048 -sha256 -days 365 -nodes \
 If clients connect from another device, include the hostname or IP they actually use in the SAN list too, for example:
 
 ```bash
--addext "subjectAltName=DNS:localhost,IP:127.0.0.1,DNS:leos-mac-mini.tailc07e2b.ts.net"
+-addext "subjectAltName=DNS:localhost,IP:127.0.0.1,DNS:bridge-host.example.com"
 ```
 
 ### Windows (PowerShell + OpenSSL)
