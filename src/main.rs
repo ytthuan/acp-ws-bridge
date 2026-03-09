@@ -4,6 +4,7 @@ mod bridge;
 mod config;
 mod copilot;
 mod history;
+mod paths;
 mod session;
 mod stats_cache;
 mod tls;
@@ -29,6 +30,30 @@ async fn main() -> anyhow::Result<()> {
         && matches.value_source("copilot_port") == Some(clap::parser::ValueSource::CommandLine)
     {
         config.copilot_mode = Some("tcp".to_string());
+    }
+
+    let uses_spawned_copilot_command =
+        config.effective_copilot_mode() == "stdio" || config.spawn_copilot;
+
+    if let Some(command) = config.acp_command.as_deref() {
+        if uses_spawned_copilot_command {
+            copilot::validate_command_override(command)?;
+            copilot::validate_command_override_for_mode(
+                command,
+                config.effective_copilot_mode(),
+                config.copilot_port,
+            )?;
+            if !config.copilot_args.is_empty() {
+                tracing::warn!(
+                    "--copilot-args are ignored when --acp-command/--command is provided"
+                );
+            }
+            info!("Custom ACP command override enabled");
+        } else {
+            tracing::warn!(
+                "--acp-command/--command is ignored when using an external Copilot TCP instance"
+            );
+        }
     }
 
     tracing_subscriber::fmt()
@@ -70,8 +95,10 @@ async fn main() -> anyhow::Result<()> {
     } else {
         match copilot::CopilotProcess::spawn_tcp(
             &config.copilot_path,
+            &config.copilot_host,
             config.copilot_port,
             &config.copilot_args,
+            config.acp_command.as_deref(),
         )
         .await
         {
@@ -99,9 +126,21 @@ async fn main() -> anyhow::Result<()> {
             config.copilot_host, config.copilot_port
         );
     }
+    let copilot_dir = config.effective_copilot_dir()?;
+    if config.copilot_dir.is_some() {
+        info!("Custom Copilot data directory enabled");
+    }
 
     // Detect Copilot CLI version
-    let copilot_cli_version = copilot::detect_version(&config.copilot_path).await;
+    let copilot_cli_version = copilot::detect_version(
+        &config.copilot_path,
+        if uses_spawned_copilot_command {
+            config.acp_command.as_deref()
+        } else {
+            None
+        },
+    )
+    .await;
     if let Some(ref v) = copilot_cli_version {
         info!("Copilot CLI version: {}", v);
     } else {
@@ -111,7 +150,9 @@ async fn main() -> anyhow::Result<()> {
     let session_manager = SessionManager::new();
 
     // Build stats cache and start background refresh task.
-    let stats_cache = Arc::new(stats_cache::StatsCache::new());
+    let stats_cache = Arc::new(stats_cache::StatsCache::with_copilot_dir(
+        copilot_dir.clone(),
+    ));
     let cache_for_task = stats_cache.clone();
     tokio::spawn(async move {
         // Initial refresh on a blocking thread so it doesn't stall the async runtime.
@@ -145,9 +186,17 @@ async fn main() -> anyhow::Result<()> {
         stats_cache,
         api::CopilotInfo {
             version: copilot_cli_version,
-            path: config.copilot_path.clone(),
+            path: copilot::effective_command_program(
+                &config.copilot_path,
+                if uses_spawned_copilot_command {
+                    config.acp_command.as_deref()
+                } else {
+                    None
+                },
+            ),
             mode: config.effective_copilot_mode().to_string(),
         },
+        copilot_dir,
     );
     let api_addr = std::net::SocketAddr::from(([0, 0, 0, 0], api_port));
 

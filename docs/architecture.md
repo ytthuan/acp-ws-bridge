@@ -22,26 +22,28 @@ The bridge exposes two network surfaces:
 - Each WebSocket client gets its own `copilot --acp --stdio --resume` child process.
 - This is the default mode and is the simplest deployment model.
 - The bridge owns the Copilot CLI stdin/stdout pipes directly.
+- A custom exact command override can replace the default spawned command when configured.
 
 ### TCP mode
 
 - The bridge connects to a Copilot CLI instance that listens on a TCP port.
 - The bridge can also auto-spawn the CLI in TCP mode when configured to do so.
 - This mode is useful when a shared Copilot CLI instance is preferred.
+- With a custom exact command override, the user is responsible for making the spawned command match the configured TCP host/port behavior.
 
 ## Main components
 
 | File | Responsibility |
 | --- | --- |
 | `src/main.rs` | Parses config, starts logging, bootstraps REST + WebSocket services |
-| `src/config.rs` | Defines CLI flags and effective runtime mode selection |
+| `src/config.rs` | Defines CLI flags, command override support, and Copilot data-dir selection |
 | `src/bridge.rs` | Wires HTTP/WebSocket routes and shared TLS handling |
 | `src/ws.rs` | Relays ACP messages, handles keepalive, tracks activity |
 | `src/session.rs` | Tracks in-memory session state, counters, idle timeout, cached commands |
 | `src/copilot.rs` | Spawns Copilot CLI processes and detects CLI version |
 | `src/api.rs` | Exposes `/health`, session APIs, history, usage, and Copilot metadata |
-| `src/history.rs` | Reads historical session data from `~/.copilot/session-store.db` |
-| `src/stats_cache.rs` | Caches usage data from `~/.copilot/session-state/**/events.jsonl` |
+| `src/history.rs` | Reads historical session data from the configured Copilot data directory |
+| `src/stats_cache.rs` | Caches usage data and stores bridge cache data under the configured Copilot data directory |
 | `src/tls.rs` | Loads TLS config and generates self-signed certs |
 | `src/acp.rs` | ACP framing and JSON-RPC helpers |
 
@@ -78,6 +80,7 @@ The bridge is intentionally conservative:
 - avoid mutating ACP payloads
 - keep transport concerns separate from history/metrics concerns
 - prefer explicit operational visibility via the REST API and logs
+- execute custom ACP command overrides directly without shell evaluation
 
 ## Safe extension points
 

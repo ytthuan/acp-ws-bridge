@@ -21,6 +21,8 @@ The test suite covers the project's core behavior in these areas:
 - `src/acp.rs` — ACP framing and JSON-RPC helpers
 - `src/api.rs` — REST API behavior
 - `src/config.rs` — CLI config parsing and defaults
+- custom ACP command parsing and configuration precedence
+- custom Copilot data directory path resolution
 - `src/session.rs` — session tracking, counters, and idle handling
 - `src/tls.rs` — TLS config and self-signed certificate generation
 - `src/ws.rs` — message extraction and relay support logic
@@ -41,6 +43,8 @@ Add or update tests when a change affects:
 - session state, counters, or timeout handling
 - REST API responses or routes
 - CLI flags or default behavior
+- custom command parsing or precedence
+- Copilot data-directory resolution
 - TLS/runtime setup logic
 
 Docs-only changes usually do not require new Rust tests, but they should still keep existing checks green when practical.

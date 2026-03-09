@@ -31,6 +31,7 @@ struct WsState {
     copilot_port: u16,
     copilot_mode: String,
     copilot_path: String,
+    acp_command: Option<String>,
     copilot_args: Vec<String>,
 }
 
@@ -57,6 +58,7 @@ impl Bridge {
             copilot_port: self.config.copilot_port,
             copilot_mode: self.config.effective_copilot_mode().to_string(),
             copilot_path: self.config.copilot_path.clone(),
+            acp_command: self.config.acp_command.clone(),
             copilot_args: self.config.copilot_args.clone(),
         };
 
@@ -118,6 +120,7 @@ async fn handle_ws_connection(
         ws::relay_stdio(
             socket,
             &state.copilot_path,
+            state.acp_command.as_deref(),
             &state.copilot_args,
             sm.clone(),
             &session_id,

@@ -1,6 +1,6 @@
 //! Persistent stats cache that incrementally ingests events.jsonl files.
 //!
-//! Stores pre-aggregated model usage counts in `~/.copilot/remo-stats-cache.db`
+//! Stores pre-aggregated model usage counts in the configured Copilot data directory
 //! and reads only the bytes added since the last scan, avoiding full re-scans.
 
 use std::path::PathBuf;
@@ -15,10 +15,16 @@ pub struct StatsCache {
 }
 
 impl StatsCache {
+    #[allow(dead_code)]
     pub fn new() -> Self {
-        let home = dirs::home_dir().unwrap_or_default();
-        let copilot_dir = home.join(".copilot");
-        let db_path = copilot_dir.join("remo-stats-cache.db");
+        Self::with_copilot_dir(
+            crate::paths::default_copilot_dir()
+                .expect("default Copilot data directory should resolve in tests"),
+        )
+    }
+
+    pub fn with_copilot_dir(copilot_dir: PathBuf) -> Self {
+        let db_path = crate::paths::stats_cache_db_path(&copilot_dir);
         let cache = Self {
             db_path,
             copilot_dir,
@@ -28,6 +34,10 @@ impl StatsCache {
     }
 
     fn init_db(&self) {
+        if let Err(e) = std::fs::create_dir_all(&self.copilot_dir) {
+            error!("Failed to create Copilot data directory: {}", e);
+            return;
+        }
         let conn = match Connection::open(&self.db_path) {
             Ok(c) => c,
             Err(e) => {
@@ -97,7 +107,7 @@ impl StatsCache {
     }
 
     fn sync_session_store(&self, conn: &Connection) {
-        let store_db = self.copilot_dir.join("session-store.db");
+        let store_db = crate::paths::session_store_path(&self.copilot_dir);
         if !store_db.exists() {
             return;
         }
@@ -200,7 +210,7 @@ impl StatsCache {
     /// Incrementally ingest new events from events.jsonl files.
     /// Only reads bytes AFTER the last known offset for each file.
     pub fn refresh(&self) {
-        let session_state = self.copilot_dir.join("session-state");
+        let session_state = crate::paths::session_state_dir(&self.copilot_dir);
         if !session_state.exists() {
             return;
         }

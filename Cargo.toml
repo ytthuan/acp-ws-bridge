@@ -1,6 +1,6 @@
 [package]
 name = "acp-ws-bridge"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2021"
 description = "WebSocket bridge between GitHub Copilot CLI (ACP) and remote clients"
 license = "MIT"
@@ -31,6 +31,7 @@ anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 dirs = "6"
+shlex = "1"
 
 [dev-dependencies]
 tempfile = "3"

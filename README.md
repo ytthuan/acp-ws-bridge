@@ -50,6 +50,12 @@ cargo run -- --generate-cert --cert-hostnames "localhost,127.0.0.1"
 
 # With custom API port
 cargo run -- --ws-port 8765 --api-port 8766
+
+# With an exact ACP command override (alias: --command)
+cargo run -- --acp-command "copilot --acp --stdio --allow-all-tools"
+
+# With a custom Copilot data directory
+cargo run -- --ws-port 8765 --copilot-dir /srv/copilot-data
 ```
 
 ## Install
@@ -76,9 +82,18 @@ Prebuilt release binaries are published on GitHub Releases for:
 | `--tls-key` | — | TLS private key path |
 | `--generate-cert` | — | Generate self-signed certificate and exit |
 | `--cert-hostnames` | `localhost,127.0.0.1` | Hostnames for self-signed certificate |
-| `--copilot-path` | `copilot` | Path to Copilot CLI |
+| `--copilot-path` | `copilot` | Path to Copilot CLI executable when using the default spawned command |
+| `--copilot-args` | — | Extra args appended to the default spawned Copilot CLI command |
+| `--acp-command`, `--command` | — | Exact Copilot ACP command override, parsed without shell execution |
+| `--copilot-mode` | `stdio` | Copilot transport mode (`stdio` or `tcp`) |
+| `--copilot-host` | `127.0.0.1` | Copilot CLI host in TCP mode |
+| `--copilot-port` | `3000` | Copilot CLI port in TCP mode |
+| `--spawn-copilot` | `true` | Disable this to connect to an already-running Copilot CLI instance |
+| `--copilot-dir` | `~/.copilot` | Copilot data directory for session history, session-state, and stats cache files |
 
 When `--tls-cert` and `--tls-key` are provided, both the WebSocket server (wss://) and the REST API (HTTPS) use the same TLS configuration.
+
+If `--acp-command` / `--command` is set, it takes precedence over `--copilot-path` and `--copilot-args`. The provided command is treated as an exact override, so it must already include the ACP transport flags you want the spawned process to use, and in TCP mode it must match the configured `--copilot-port`.
 
 ## REST API
 
@@ -94,7 +109,7 @@ The REST API runs on a separate port (default: `--ws-port` + 1).
 | `GET /api/stats` | Aggregate session statistics |
 | `GET /api/copilot/info` | Copilot CLI version, path, mode, GA status, feature capabilities |
 | `GET /api/copilot/usage` | Copilot CLI usage statistics (model usage, tool executions) |
-| `GET /api/history/sessions` | Historical sessions from `~/.copilot/session-store.db` |
+| `GET /api/history/sessions` | Historical sessions from the configured Copilot data directory |
 | `GET /api/history/sessions/:id/turns` | Session conversation turns |
 | `GET /api/history/stats` | Aggregate historical statistics |
 

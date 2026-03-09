@@ -234,6 +234,7 @@ pub async fn relay_lazy(
 pub async fn relay_stdio(
     ws_stream: WebSocket,
     copilot_path: &str,
+    acp_command: Option<&str>,
     copilot_args: &[String],
     sm: SessionManager,
     session_id: &str,
@@ -260,6 +261,7 @@ pub async fn relay_stdio(
     let sm_clone = sm.clone();
     let sid = session_id.to_string();
     let copilot_path = copilot_path.to_string();
+    let acp_command = acp_command.map(ToOwned::to_owned);
     let copilot_args = copilot_args.to_vec();
     let mut shutdown_rx = shutdown_rx;
 
@@ -301,7 +303,13 @@ pub async fn relay_stdio(
                         {
                             let mut writer_guard = stdio_writer.lock().await;
                             if writer_guard.is_none() {
-                                match CopilotProcess::spawn_stdio(&copilot_path, &copilot_args).await {
+                                match CopilotProcess::spawn_stdio(
+                                    &copilot_path,
+                                    &copilot_args,
+                                    acp_command.as_deref(),
+                                )
+                                .await
+                                {
                                     Ok((proc, crate::copilot::CopilotTransport::Stdio { stdin, stdout })) => {
                                         *writer_guard = Some(tokio::io::BufWriter::new(stdin));
                                         *child_process.lock().await = Some(proc);

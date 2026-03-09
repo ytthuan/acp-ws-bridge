@@ -1,14 +1,21 @@
-//! Read-only access to Copilot CLI session history from ~/.copilot/session-store.db.
+//! Read-only access to Copilot CLI session history from the configured Copilot data directory.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::Path;
 
 use rusqlite::Connection;
 use serde::Serialize;
 
-/// Get the path to ~/.copilot/session-store.db
-fn session_store_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".copilot").join("session-store.db"))
+fn open_session_store(copilot_dir: &Path) -> anyhow::Result<Option<Connection>> {
+    let db_path = crate::paths::session_store_path(copilot_dir);
+    if !db_path.exists() {
+        return Ok(None);
+    }
+
+    Ok(Some(Connection::open_with_flags(
+        db_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?))
 }
 
 #[derive(Debug, Serialize)]
@@ -98,12 +105,17 @@ pub struct HistoryStats {
 }
 
 /// List all sessions with turn counts, ordered by most recent first.
+#[allow(dead_code)]
 pub fn list_sessions() -> anyhow::Result<Vec<HistorySession>> {
-    let db_path = match session_store_path() {
-        Some(p) => p,
-        None => return Ok(vec![]),
+    let copilot_dir = crate::paths::default_copilot_dir()?;
+    list_sessions_from(&copilot_dir)
+}
+
+/// List all sessions with turn counts from the configured Copilot data directory.
+pub fn list_sessions_from(copilot_dir: &Path) -> anyhow::Result<Vec<HistorySession>> {
+    let Some(conn) = open_session_store(copilot_dir)? else {
+        return Ok(vec![]);
     };
-    let conn = Connection::open(db_path)?;
     let mut stmt = conn.prepare(
         "SELECT s.id, s.cwd, s.repository, s.branch, s.summary, s.created_at, s.updated_at,
                 COALESCE((SELECT COUNT(*) FROM turns t WHERE t.session_id = s.id), 0) as turn_count,
@@ -130,12 +142,20 @@ pub fn list_sessions() -> anyhow::Result<Vec<HistorySession>> {
 }
 
 /// Get turns for a specific session, ordered by turn index.
+#[allow(dead_code)]
 pub fn get_session_turns(session_id: &str) -> anyhow::Result<Vec<HistoryTurn>> {
-    let db_path = match session_store_path() {
-        Some(p) => p,
-        None => return Ok(vec![]),
+    let copilot_dir = crate::paths::default_copilot_dir()?;
+    get_session_turns_from(&copilot_dir, session_id)
+}
+
+/// Get turns for a specific session from the configured Copilot data directory.
+pub fn get_session_turns_from(
+    copilot_dir: &Path,
+    session_id: &str,
+) -> anyhow::Result<Vec<HistoryTurn>> {
+    let Some(conn) = open_session_store(copilot_dir)? else {
+        return Ok(vec![]);
     };
-    let conn = Connection::open(db_path)?;
     let mut stmt = conn.prepare(
         "SELECT turn_index, user_message, assistant_response, timestamp
          FROM turns WHERE session_id = ? ORDER BY turn_index",
@@ -154,12 +174,17 @@ pub fn get_session_turns(session_id: &str) -> anyhow::Result<Vec<HistoryTurn>> {
 }
 
 /// Get aggregate statistics across all sessions.
+#[allow(dead_code)]
 pub fn get_history_stats() -> anyhow::Result<HistoryStats> {
-    let db_path = match session_store_path() {
-        Some(p) => p,
-        None => anyhow::bail!("Could not determine home directory"),
+    let copilot_dir = crate::paths::default_copilot_dir()?;
+    get_history_stats_from(&copilot_dir)
+}
+
+/// Get aggregate statistics across all sessions from the configured Copilot data directory.
+pub fn get_history_stats_from(copilot_dir: &Path) -> anyhow::Result<HistoryStats> {
+    let Some(conn) = open_session_store(copilot_dir)? else {
+        anyhow::bail!("history database unavailable");
     };
-    let conn = Connection::open(db_path)?;
 
     let total_sessions: i64 = conn.query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0))?;
     let total_turns: i64 = conn.query_row("SELECT COUNT(*) FROM turns", [], |r| r.get(0))?;

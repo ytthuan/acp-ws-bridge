@@ -2,7 +2,7 @@
 name: rust-bridge-agent
 description: Implements and maintains the acp-ws-bridge Rust server — WebSocket-to-stdio bridge for relaying ACP JSON-RPC messages between the Remo iOS app and GitHub Copilot CLI. Handles Tokio async, WebSocket/TCP, message relay, and Rust toolchain.
 tools: [execute, read, edit, search, agent, todo, web]
-model: GPT-5.3-Codex (copilot)
+model: gpt-5.3-codex
 ---
 
 # Rust Bridge Agent — Executor
@@ -106,6 +106,7 @@ async fn relay_message(msg: Message) -> Result<Vec<u8>> {
 ### CLI Arguments (Config struct in `src/config.rs`)
 ```rust
 use clap::Parser;
+use std::path::PathBuf;
 
 #[derive(Parser, Debug, Clone)]
 #[command(name = "acp-ws-bridge")]
@@ -134,12 +135,16 @@ pub struct Config {
     pub log_level: String,
     #[arg(long, default_value = "copilot")]
     pub copilot_path: String,
+    #[arg(long, visible_alias = "command")]
+    pub acp_command: Option<String>,
     #[arg(long, default_value = "true")]
     pub spawn_copilot: bool,
     #[arg(long)]
     pub copilot_args: Vec<String>,
     #[arg(long)]
     pub copilot_mode: Option<String>,
+    #[arg(long)]
+    pub copilot_dir: Option<PathBuf>,
 }
 ```
 
@@ -161,18 +166,20 @@ Each WebSocket client spawns its own Copilot CLI process via piped stdin/stdout 
 ```bash
 cargo run -- --ws-port 8765                    # default stdio mode
 cargo run -- --ws-port 8765 --copilot-path /usr/local/bin/copilot
+cargo run -- --ws-port 8765 --acp-command "copilot --acp --stdio --allow-all-tools"
 ```
 
-**Spawn command:** `copilot --acp --stdio` (see `src/copilot.rs: spawn_stdio()`)
+**Default spawn command:** `copilot --acp --stdio --resume` (see `src/copilot.rs: spawn_stdio()`)
 
 ### TCP Mode
 Bridge connects to a shared Copilot CLI instance over TCP.
 
 ```bash
 cargo run -- --ws-port 8765 --copilot-mode tcp --copilot-port 3000
+cargo run -- --copilot-mode tcp --copilot-port 3000 --command "copilot --acp --port 3000 --allow-all-tools"
 ```
 
-**Spawn command:** `copilot --acp --port <port>` (see `src/copilot.rs: spawn_tcp()`)
+**Default spawn command:** `copilot --acp --port <port> --resume` (see `src/copilot.rs: spawn_tcp()`)
 
 ### Mode Summary
 

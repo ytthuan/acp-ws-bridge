@@ -1,6 +1,7 @@
 //! Configuration types and loading.
 
 use clap::Parser;
+use std::path::PathBuf;
 
 #[derive(Parser, Debug, Clone)]
 #[command(
@@ -56,6 +57,11 @@ pub struct Config {
     #[arg(long, default_value = "copilot")]
     pub copilot_path: String,
 
+    /// Exact ACP command override for spawning Copilot CLI.
+    /// This is parsed without shell execution and takes precedence over --copilot-path/--copilot-args.
+    #[arg(long, visible_alias = "command")]
+    pub acp_command: Option<String>,
+
     /// Automatically spawn Copilot CLI as a child process
     #[arg(long, default_value = "true")]
     pub spawn_copilot: bool,
@@ -68,6 +74,10 @@ pub struct Config {
     /// Auto-detected as "tcp" when --copilot-port is explicitly provided.
     #[arg(long)]
     pub copilot_mode: Option<String>,
+
+    /// Copilot data directory (default: ~/.copilot)
+    #[arg(long)]
+    pub copilot_dir: Option<PathBuf>,
 }
 
 impl Config {
@@ -80,12 +90,21 @@ impl Config {
             "stdio"
         }
     }
+
+    /// Resolved Copilot data directory.
+    pub fn effective_copilot_dir(&self) -> anyhow::Result<PathBuf> {
+        match &self.copilot_dir {
+            Some(dir) => Ok(dir.clone()),
+            None => crate::paths::default_copilot_dir(),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use clap::Parser;
+    use std::path::Path;
 
     #[test]
     fn test_default_config() {
@@ -102,10 +121,16 @@ mod tests {
         assert_eq!(config.cert_hostnames, "localhost,127.0.0.1");
         assert_eq!(config.log_level, "info");
         assert_eq!(config.copilot_path, "copilot");
+        assert!(config.acp_command.is_none());
         assert!(config.spawn_copilot);
         assert!(config.copilot_args.is_empty());
         assert!(config.copilot_mode.is_none());
+        assert!(config.copilot_dir.is_none());
         assert_eq!(config.effective_copilot_mode(), "stdio");
+        assert!(config
+            .effective_copilot_dir()
+            .unwrap()
+            .ends_with(".copilot"));
     }
 
     #[test]
@@ -137,6 +162,32 @@ mod tests {
         assert_eq!(config.tls_cert.as_deref(), Some("/tmp/cert.pem"));
         assert_eq!(config.tls_key.as_deref(), Some("/tmp/key.pem"));
         assert_eq!(config.log_level, "debug");
+    }
+
+    #[test]
+    fn test_acp_command_alias() {
+        let config = Config::parse_from([
+            "test",
+            "--command",
+            "copilot --acp --stdio --allow-all-tools",
+        ]);
+        assert_eq!(
+            config.acp_command.as_deref(),
+            Some("copilot --acp --stdio --allow-all-tools")
+        );
+    }
+
+    #[test]
+    fn test_copilot_dir_custom() {
+        let config = Config::parse_from(["test", "--copilot-dir", "/tmp/copilot-data"]);
+        assert_eq!(
+            config.copilot_dir.as_deref(),
+            Some(Path::new("/tmp/copilot-data"))
+        );
+        assert_eq!(
+            config.effective_copilot_dir().unwrap(),
+            PathBuf::from("/tmp/copilot-data")
+        );
     }
 
     #[test]

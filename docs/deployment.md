@@ -15,7 +15,7 @@ The REST API is intended for local operational visibility, not as a public repla
 
 - GitHub Copilot CLI installed on the host
 - Copilot CLI already authenticated for the runtime user
-- access to the runtime user's `~/.copilot` directory for history/usage features
+- access to the runtime user's Copilot data directory for history/usage features (`~/.copilot` by default)
 - TLS certificate and key if you plan to expose the bridge over untrusted networks
 
 ## Install options
@@ -40,6 +40,14 @@ Use stdio mode unless you have a specific reason to share a Copilot CLI instance
 acp-ws-bridge --ws-port 8765 --api-port 8766
 ```
 
+If you want to override the spawned Copilot command exactly, use:
+
+```bash
+acp-ws-bridge \
+  --ws-port 8765 \
+  --acp-command "copilot --acp --stdio --allow-all-tools"
+```
+
 ### TCP mode
 
 Use TCP mode when you want the bridge to connect to or auto-spawn a Copilot CLI instance listening on a port.
@@ -51,6 +59,31 @@ acp-ws-bridge \
   --copilot-mode tcp \
   --copilot-port 3000
 ```
+
+With an exact TCP command override, you are responsible for including the ACP/TCP flags and matching the configured port:
+
+```bash
+acp-ws-bridge \
+  --copilot-mode tcp \
+  --copilot-port 3000 \
+  --command "copilot --acp --port 3000 --allow-all-tools"
+```
+
+## Custom Copilot data directory
+
+Use `--copilot-dir` when Copilot session data lives somewhere other than `~/.copilot`:
+
+```bash
+acp-ws-bridge \
+  --ws-port 8765 \
+  --copilot-dir /srv/copilot-data
+```
+
+This affects:
+
+- `session-store.db` history lookups
+- `session-state/**/events.jsonl` usage scanning
+- the bridge stats-cache database location
 
 ## TLS
 
@@ -91,7 +124,7 @@ RestartSec=5
 WantedBy=multi-user.target
 ```
 
-Adjust paths, user, ports, and TLS flags to match your environment.
+Adjust paths, user, ports, TLS flags, `--copilot-dir`, and any custom command override to match your environment.
 
 ## Operational checks
 
@@ -125,6 +158,7 @@ RUST_LOG=acp_ws_bridge=debug acp-ws-bridge --ws-port 8765
 ### Copilot CLI fails to spawn
 
 - confirm the configured `--copilot-path` exists
+- if using `--acp-command` / `--command`, confirm the full override command is valid and already includes the ACP flags you expect
 - confirm the runtime user can run `copilot --version`
 - confirm the runtime user is already authenticated with Copilot CLI
 
@@ -135,8 +169,8 @@ RUST_LOG=acp_ws_bridge=debug acp-ws-bridge --ws-port 8765
 
 ### No history or usage data appears
 
-- confirm the runtime user has a populated `~/.copilot` directory
-- confirm `~/.copilot/session-store.db` exists for history endpoints
+- confirm the configured Copilot data directory is populated
+- confirm `session-store.db` exists in that directory for history endpoints
 - confirm session-state event files exist for cached usage metrics
 
 ### TLS handshake issues

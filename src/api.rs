@@ -1,5 +1,6 @@
 //! HTTP/REST API endpoints (health checks, session listing, etc.).
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -30,6 +31,7 @@ struct ApiState {
     start_time: Arc<Instant>,
     stats_cache: Arc<StatsCache>,
     copilot_info: CopilotInfo,
+    copilot_dir: PathBuf,
 }
 
 /// GET /health — Health check
@@ -92,37 +94,71 @@ async fn get_stats(State(state): State<ApiState>) -> Json<SessionStats> {
     Json(state.session_manager.get_stats().await)
 }
 
-// -- History endpoints (read-only, from ~/.copilot/session-store.db) --
+// -- History endpoints (read-only, from the configured Copilot data directory) --
 
 /// GET /api/history/sessions — list all historical sessions
-async fn list_history_sessions() -> impl IntoResponse {
-    match history::list_sessions() {
+async fn list_history_sessions(State(state): State<ApiState>) -> impl IntoResponse {
+    match history::list_sessions_from(&state.copilot_dir) {
         Ok(sessions) => Json(sessions).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        Err(e) => {
+            tracing::error!("Failed to load history sessions: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "history database unavailable",
+            )
+                .into_response()
+        }
     }
 }
 
 /// GET /api/history/sessions/:id — get session turns
-async fn get_history_session(Path(id): Path<String>) -> impl IntoResponse {
-    match history::get_session_turns(&id) {
+async fn get_history_session(
+    State(state): State<ApiState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    match history::get_session_turns_from(&state.copilot_dir, &id) {
         Ok(turns) => Json(turns).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        Err(e) => {
+            tracing::error!("Failed to load history session {}: {}", id, e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "history database unavailable",
+            )
+                .into_response()
+        }
     }
 }
 
 /// GET /api/history/sessions/:id/turns — get session turns (explicit sub-route)
-async fn get_history_session_turns(Path(id): Path<String>) -> impl IntoResponse {
-    match history::get_session_turns(&id) {
+async fn get_history_session_turns(
+    State(state): State<ApiState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    match history::get_session_turns_from(&state.copilot_dir, &id) {
         Ok(turns) => Json(turns).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        Err(e) => {
+            tracing::error!("Failed to load history session turns {}: {}", id, e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "history database unavailable",
+            )
+                .into_response()
+        }
     }
 }
 
 /// GET /api/history/stats — aggregate stats
-async fn get_history_stats() -> impl IntoResponse {
-    match history::get_history_stats() {
+async fn get_history_stats(State(state): State<ApiState>) -> impl IntoResponse {
+    match history::get_history_stats_from(&state.copilot_dir) {
         Ok(stats) => Json(stats).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        Err(e) => {
+            tracing::error!("Failed to load history stats: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "history database unavailable",
+            )
+                .into_response()
+        }
     }
 }
 
@@ -224,12 +260,14 @@ pub fn api_router(
     session_manager: SessionManager,
     stats_cache: Arc<StatsCache>,
     copilot_info: CopilotInfo,
+    copilot_dir: PathBuf,
 ) -> Router {
     let state = ApiState {
         session_manager,
         start_time: Arc::new(Instant::now()),
         stats_cache,
         copilot_info,
+        copilot_dir,
     };
 
     Router::new()
@@ -281,6 +319,7 @@ mod tests {
             SessionManager::new(),
             Arc::new(StatsCache::new()),
             test_copilot_info(),
+            PathBuf::from("/tmp/copilot-data"),
         )
     }
 
@@ -415,6 +454,7 @@ mod tests {
             sm,
             std::sync::Arc::new(crate::stats_cache::StatsCache::new()),
             test_copilot_info(),
+            PathBuf::from("/tmp/copilot-data"),
         );
         let req = Request::builder()
             .uri("/api/sessions")
@@ -436,6 +476,7 @@ mod tests {
             sm,
             std::sync::Arc::new(crate::stats_cache::StatsCache::new()),
             test_copilot_info(),
+            PathBuf::from("/tmp/copilot-data"),
         );
         let req = Request::builder()
             .uri(format!("/api/sessions/{}", info.id))
@@ -457,6 +498,7 @@ mod tests {
             sm,
             std::sync::Arc::new(crate::stats_cache::StatsCache::new()),
             test_copilot_info(),
+            PathBuf::from("/tmp/copilot-data"),
         );
         let req = Request::builder()
             .method("DELETE")
@@ -484,6 +526,7 @@ mod tests {
             sm,
             std::sync::Arc::new(crate::stats_cache::StatsCache::new()),
             test_copilot_info(),
+            PathBuf::from("/tmp/copilot-data"),
         );
         let req = Request::builder()
             .uri("/api/stats")
@@ -519,6 +562,7 @@ mod tests {
             sm,
             std::sync::Arc::new(crate::stats_cache::StatsCache::new()),
             test_copilot_info(),
+            PathBuf::from("/tmp/copilot-data"),
         );
         let req = Request::builder()
             .uri(format!("/api/sessions/{}/commands", info.id))
@@ -541,6 +585,7 @@ mod tests {
             sm,
             std::sync::Arc::new(crate::stats_cache::StatsCache::new()),
             test_copilot_info(),
+            PathBuf::from("/tmp/copilot-data"),
         );
         let req = Request::builder()
             .uri(format!("/api/sessions/{}/commands", info.id))
