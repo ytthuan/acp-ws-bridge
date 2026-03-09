@@ -11,6 +11,7 @@ use axum::extract::State;
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::Router;
+use tokio_rustls::TlsAcceptor;
 
 use crate::config::Config;
 use crate::session::{SessionManager, SessionStatus};
@@ -20,7 +21,7 @@ use crate::ws;
 pub struct Bridge {
     config: Config,
     session_manager: SessionManager,
-    tls_acceptor: Option<tokio_native_tls::TlsAcceptor>,
+    tls_acceptor: Option<TlsAcceptor>,
 }
 
 /// Shared state for WebSocket upgrade handlers.
@@ -39,7 +40,7 @@ impl Bridge {
     pub fn new(
         config: Config,
         session_manager: SessionManager,
-        tls_acceptor: Option<tokio_native_tls::TlsAcceptor>,
+        tls_acceptor: Option<TlsAcceptor>,
     ) -> Self {
         Self {
             config,
@@ -178,7 +179,7 @@ impl hyper::service::Service<hyper::Request<hyper::body::Incoming>> for TlsServi
 pub(crate) async fn serve_with_tls(
     listener: tokio::net::TcpListener,
     app: Router,
-    tls_acceptor: tokio_native_tls::TlsAcceptor,
+    tls_acceptor: TlsAcceptor,
 ) -> anyhow::Result<()> {
     use hyper_util::rt::{TokioExecutor, TokioIo};
     use hyper_util::server::conn::auto;

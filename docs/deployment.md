@@ -107,6 +107,8 @@ openssl req -x509 -newkey rsa:2048 -sha256 -days 365 -nodes \
   -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
 ```
 
+If clients connect from another device, include the externally used hostname or IP in `subjectAltName` as well.
+
 Then start the bridge with:
 
 ```bash

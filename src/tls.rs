@@ -1,9 +1,12 @@
 //! TLS configuration and self-signed certificate generation via rcgen.
 
+use std::io::BufReader;
 use std::path::Path;
+use std::sync::Arc;
 
 use anyhow::Result;
-use tokio_native_tls::TlsAcceptor;
+use tokio_rustls::rustls;
+use tokio_rustls::TlsAcceptor;
 
 /// Generate a self-signed certificate and save to disk.
 pub fn generate_self_signed_cert(
@@ -36,13 +39,28 @@ pub fn generate_self_signed_cert(
 
 /// Load TLS config from cert/key files and return a TlsAcceptor.
 pub fn load_tls_config(cert_path: &str, key_path: &str) -> Result<TlsAcceptor> {
-    let cert_pem = std::fs::read(cert_path)?;
-    let key_pem = std::fs::read(key_path)?;
+    let cert_file = std::fs::File::open(cert_path)?;
+    let key_file = std::fs::File::open(key_path)?;
 
-    let identity = native_tls::Identity::from_pkcs8(&cert_pem, &key_pem)?;
-    let native_acceptor = native_tls::TlsAcceptor::new(identity)?;
+    let mut cert_reader = BufReader::new(cert_file);
+    let cert_chain =
+        rustls_pemfile::certs(&mut cert_reader).collect::<std::result::Result<Vec<_>, _>>()?;
+    if cert_chain.is_empty() {
+        anyhow::bail!("No certificates found in {}", cert_path);
+    }
 
-    Ok(TlsAcceptor::from(native_acceptor))
+    let mut key_reader = BufReader::new(key_file);
+    let private_key = rustls_pemfile::private_key(&mut key_reader)?
+        .ok_or_else(|| anyhow::anyhow!("No private key found in {}", key_path))?;
+
+    let mut server_config = rustls::ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(cert_chain, private_key)?;
+    // Leave ALPN unset so the shared TLS config cannot negotiate HTTP/2 on the
+    // WebSocket listener, which relies on HTTP/1.1 upgrade semantics.
+    server_config.alpn_protocols.clear();
+
+    Ok(TlsAcceptor::from(Arc::new(server_config)))
 }
 
 #[cfg(test)]
@@ -89,16 +107,8 @@ mod tests {
 
         generate_self_signed_cert(&cert_path, &key_path, &hostnames).unwrap();
 
-        // Verify the generated files contain valid PEM data that could be loaded.
-        // Note: load_tls_config uses native-tls Identity::from_pkcs8 which may
-        // not support all key types (e.g., ECDSA) on all platforms. We test
-        // the file I/O and PEM structure instead.
-        let cert_pem = std::fs::read_to_string(&cert_path).unwrap();
-        let key_pem = std::fs::read_to_string(&key_path).unwrap();
-        assert!(cert_pem.contains("BEGIN CERTIFICATE"));
-        assert!(cert_pem.contains("END CERTIFICATE"));
-        assert!(key_pem.contains("BEGIN PRIVATE KEY"));
-        assert!(key_pem.contains("END PRIVATE KEY"));
+        let acceptor = load_tls_config(cert_path.to_str().unwrap(), key_path.to_str().unwrap());
+        assert!(acceptor.is_ok());
     }
 
     #[test]

@@ -44,7 +44,7 @@ The bridge exposes two network surfaces:
 | `src/api.rs` | Exposes `/health`, session APIs, history, usage, and Copilot metadata |
 | `src/history.rs` | Reads historical session data from the configured Copilot data directory |
 | `src/stats_cache.rs` | Caches usage data and stores bridge cache data under the configured Copilot data directory |
-| `src/tls.rs` | Loads TLS config and generates self-signed certs |
+| `src/tls.rs` | Loads PEM TLS config with rustls and generates self-signed certs |
 | `src/acp.rs` | ACP framing and JSON-RPC helpers |
 
 ## Session lifecycle

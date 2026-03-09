@@ -141,6 +141,12 @@ openssl req -x509 -newkey rsa:2048 -sha256 -days 365 -nodes \
   -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
 ```
 
+If clients connect from another device, include the hostname or IP they actually use in the SAN list too, for example:
+
+```bash
+-addext "subjectAltName=DNS:localhost,IP:127.0.0.1,DNS:leos-mac-mini.tailc07e2b.ts.net"
+```
+
 ### Windows (PowerShell + OpenSSL)
 
 ```powershell
@@ -156,6 +162,8 @@ Once the files exist, start the installed binary with:
 ```bash
 acp-ws-bridge --ws-port 8765 --tls-cert cert.pem --tls-key key.pem
 ```
+The bridge loads these PEM files directly and should not need macOS keychain identity access for the server certificate.
+
 Run in background with:
 
 ```bash

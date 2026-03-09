@@ -24,7 +24,7 @@ The test suite covers the project's core behavior in these areas:
 - custom ACP command parsing and configuration precedence
 - custom Copilot data directory path resolution
 - `src/session.rs` — session tracking, counters, and idle handling
-- `src/tls.rs` — TLS config and self-signed certificate generation
+- `src/tls.rs` — rustls-based TLS config loading and self-signed certificate generation
 - `src/ws.rs` — message extraction and relay support logic
 
 In addition to Rust tests, CI also validates:

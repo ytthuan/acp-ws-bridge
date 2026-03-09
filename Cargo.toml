@@ -1,6 +1,6 @@
 [package]
 name = "acp-ws-bridge"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
 description = "WebSocket bridge between GitHub Copilot CLI (ACP) and remote clients"
 license = "MIT"
@@ -23,8 +23,8 @@ tower = "0.5"
 tower-http = { version = "0.5", features = ["cors", "trace"] }
 hyper = { version = "1", features = ["server"] }
 hyper-util = { version = "0.1", features = ["tokio", "server-auto"] }
-native-tls = "0.2"
-tokio-native-tls = "0.3"
+tokio-rustls = "0.26"
+rustls-pemfile = "2"
 rcgen = "0.13"
 futures-util = "0.3"
 anyhow = "1"
