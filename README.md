@@ -45,18 +45,16 @@ cargo run -- --ws-port 8765
 # With TLS (enables wss:// for WebSocket and HTTPS for REST API)
 cargo run -- --ws-port 8765 --tls-cert cert.pem --tls-key key.pem
 
-# Generate cert.pem/key.pem with OpenSSL
-openssl req -x509 -newkey rsa:2048 -sha256 -days 365 -nodes \
-  -keyout key.pem \
-  -out cert.pem \
-  -subj "/CN=localhost" \
-  -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+# Generate cert.pem/key.pem with mkcert (after `mkcert -install`)
+mkcert -key-file key.pem \
+  -cert-file cert.pem \
+  localhost 127.0.0.1 ::1
 
 # With custom API port
 cargo run -- --ws-port 8765 --api-port 8766
 
 # With an exact ACP command override (alias: --command)
-cargo run -- --acp-command "copilot --acp --stdio --allow-all-tools"
+cargo run -- --acp-command "copilot --acp --stdio --allow-all"
 
 # With a custom Copilot data directory
 cargo run -- --ws-port 8765 --copilot-dir /srv/copilot-data
@@ -127,25 +125,49 @@ The REST API runs on a separate port (default: `--ws-port` + 1).
 - [Testing](docs/testing.md)
 - [Release runbook](docs/release.md)
 
-## Generate TLS Cert/Key with OpenSSL
+## Generate TLS Cert/Key
 
-If you installed `acp-ws-bridge` from crates.io or GitHub Releases and just need `cert.pem` / `key.pem`, you can generate them directly with OpenSSL:
+If you installed `acp-ws-bridge` from crates.io or GitHub Releases and just need `cert.pem` / `key.pem` for local TLS, `mkcert` is the simplest option on macOS and Linux.
 
-### macOS / Linux
-
-```bash
-openssl req -x509 -newkey rsa:2048 -sha256 -days 365 -nodes \
-  -keyout key.pem \
-  -out cert.pem \
-  -subj "/CN=localhost" \
-  -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
-```
-
-If clients connect from another device, include the hostname or IP they actually use in the SAN list too, for example:
+### macOS
 
 ```bash
--addext "subjectAltName=DNS:localhost,IP:127.0.0.1,DNS:bridge-host.example.com"
+brew install mkcert
+brew install nss
+mkcert -install
 ```
+
+`nss` is only needed if you want Firefox and other NSS-based clients to trust the local CA.
+
+### Linux
+
+Install `mkcert` from your distro package manager or the upstream release, plus the NSS tools package if you want Firefox and other NSS-based clients to trust the local CA.
+
+```bash
+# Debian / Ubuntu
+sudo apt install mkcert libnss3-tools
+
+# Fedora
+sudo dnf install mkcert nss-tools
+
+# Arch Linux
+sudo pacman -S mkcert nss
+
+# One-time local CA install
+mkcert -install
+```
+
+Generate a certificate and key for every hostname or IP your clients will use:
+
+```bash
+mkcert -key-file key.pem \
+  -cert-file cert.pem \
+  localhost 127.0.0.1 ::1 192.168.0.100 bridge-host.example.com
+```
+
+Replace `192.168.0.100` and `bridge-host.example.com` with the LAN IP and DNS name clients actually use.
+
+If a client connects from another device, that device must also trust the `mkcert` root CA. Use `mkcert -CAROOT` to locate the CA files if you need to import them on another machine or device.
 
 ### Windows (PowerShell + OpenSSL)
 

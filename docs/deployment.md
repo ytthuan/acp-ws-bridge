@@ -97,17 +97,15 @@ acp-ws-bridge \
   --tls-key /path/to/key.pem
 ```
 
-For local testing with an installed binary, generate `cert.pem` and `key.pem` with OpenSSL first:
+For local testing with an installed binary on macOS or Linux, generate `cert.pem` and `key.pem` with `mkcert` after running `mkcert -install`:
 
 ```bash
-openssl req -x509 -newkey rsa:2048 -sha256 -days 365 -nodes \
-  -keyout key.pem \
-  -out cert.pem \
-  -subj "/CN=localhost" \
-  -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+mkcert -key-file key.pem \
+  -cert-file cert.pem \
+  localhost 127.0.0.1 ::1 192.168.0.100 bridge-host.example.com
 ```
 
-If clients connect from another device, include the externally used hostname or IP in `subjectAltName` as well.
+If clients connect from another device, include the externally used hostname or IP in the `mkcert` command, and make sure that client trusts the `mkcert` root CA too.
 
 Then start the bridge with:
 
