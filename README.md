@@ -57,7 +57,7 @@ cargo run -- --ws-port 8765 --api-port 8766
 cargo run -- --acp-command "copilot --acp --stdio --allow-all"
 
 # With a custom Copilot data directory
-cargo run -- --ws-port 8765 --copilot-dir /srv/copilot-data
+cargo run -- --ws-port 8765 --copilot-dir /srv/copilot-home
 ```
 
 ## Install
@@ -169,15 +169,6 @@ Replace `192.168.0.100` and `bridge-host.example.com` with the LAN IP and DNS na
 
 If a client connects from another device, that device must also trust the `mkcert` root CA. Use `mkcert -CAROOT` to locate the CA files if you need to import them on another machine or device.
 
-### Windows (PowerShell + OpenSSL)
-
-```powershell
-openssl req -x509 -newkey rsa:2048 -sha256 -days 365 -nodes `
-  -keyout key.pem `
-  -out cert.pem `
-  -subj "/CN=localhost" `
-  -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
-```
 
 Once the files exist, start the installed binary with:
 
@@ -191,6 +182,43 @@ Run in background with:
 ```bash
 acp-ws-bridge  --ws-port 8700 --acp-command "copilot --acp --stdio" --tls-cert cert.pem --tls-key key.pem  --log-level debug >~/logs/acp-ws-8700.log 2>&1 &
 ```
+
+## Tailscale Serve (Reverse Proxy)
+
+If the machine running the bridge is on a [Tailscale](https://tailscale.com) tailnet, you can skip certificate management entirely and let Tailscale provide automatic HTTPS/WSS with a valid Let's Encrypt certificate.
+
+Run the bridge **without** `--tls-*` flags (plain HTTP/WS):
+
+```bash
+acp-ws-bridge --ws-port 8765
+```
+
+Then use `tailscale serve` to expose both ports over HTTPS:
+
+```bash
+# Reverse-proxy HTTPS → local WebSocket port (wss:// for clients)
+tailscale serve --bg https / http://localhost:8765
+
+# Reverse-proxy HTTPS on /api → local REST API port
+tailscale serve --bg https /api http://localhost:8766
+```
+
+Clients on the tailnet connect to:
+
+```
+wss://<machine-name>.<tailnet-name>.ts.net/
+https://<machine-name>.<tailnet-name>.ts.net/api/health
+```
+
+Tailscale handles TLS termination, certificate renewal, and access control — no `mkcert`, no self-signed certs, no keychain prompts.
+
+To stop serving:
+
+```bash
+tailscale serve off
+```
+
+See [`tailscale serve` docs](https://tailscale.com/kb/1242/tailscale-serve) for more options.
 
 ## Release Process
 

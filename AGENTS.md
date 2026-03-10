@@ -12,8 +12,8 @@
 ```
 ┌──────────────────┐       stdio/NDJSON      ┌──────────────────┐     WebSocket/NDJSON    ┌─────────────────┐
 │  GitHub Copilot  │◄───────────────────────►│  acp-ws-bridge   │◄───────────────────────►│  Remo iOS App   │
-│  CLI (Host)      │                          │  (Rust Server)   │                          │  (SwiftUI)      │
-└──────────────────┘                          └──────────────────┘                          └─────────────────┘
+│  CLI (Host)      │                         │  (Rust Server)   │                         │  RemoWeb(nextjs)│
+└──────────────────┘                         └──────────────────┘                         └─────────────────┘
        ACP Host                                Transport Bridge                               ACP Client
 ```
 

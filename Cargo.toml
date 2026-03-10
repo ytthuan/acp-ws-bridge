@@ -1,6 +1,6 @@
 [package]
 name = "acp-ws-bridge"
-version = "0.3.2"
+version = "0.3.3"
 edition = "2021"
 description = "WebSocket bridge between GitHub Copilot CLI (ACP) and remote clients"
 license = "MIT"

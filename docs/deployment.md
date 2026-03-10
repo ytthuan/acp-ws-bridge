@@ -113,6 +113,40 @@ Then start the bridge with:
 acp-ws-bridge --ws-port 8765 --api-port 8766 --tls-cert cert.pem --tls-key key.pem
 ```
 
+## Tailscale Serve (Reverse Proxy)
+
+If the host is on a [Tailscale](https://tailscale.com) tailnet, you can let Tailscale handle TLS instead of managing certificates yourself.
+
+Run the bridge in plain mode (no `--tls-*` flags):
+
+```bash
+acp-ws-bridge --ws-port 8765 --api-port 8766
+```
+
+Then expose both ports over HTTPS with `tailscale serve`:
+
+```bash
+tailscale serve --bg https / http://localhost:8765
+tailscale serve --bg https /api http://localhost:8766
+```
+
+Clients on the tailnet connect using the machine's Tailscale FQDN:
+
+```
+wss://<machine-name>.<tailnet-name>.ts.net/
+https://<machine-name>.<tailnet-name>.ts.net/api/health
+```
+
+Tailscale provisions a valid Let's Encrypt certificate automatically — no `mkcert`, no self-signed certs, no CA trust setup on client devices.
+
+To stop serving:
+
+```bash
+tailscale serve off
+```
+
+See [`tailscale serve` docs](https://tailscale.com/kb/1242/tailscale-serve) for more options.
+
 ## Example systemd unit
 
 ```ini
